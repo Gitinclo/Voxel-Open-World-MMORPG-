@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { LINEAGES } from './rules';
-import type { LineageId } from './types';
+import type { LineageId, PetEvolutionStage, PetSpeciesKey, TroopBranch } from './types';
 
 // Shared contact shadow texture & disc so every actor/vehicle/pickup sits grounded
 let _contactShadowTex: THREE.CanvasTexture | null = null;
@@ -1069,4 +1069,536 @@ export function createIslandTransitShuttle(): TransitShuttleModel {
   group.add(lowerChassis, upperCabin, windowBand, roofRack, hlL, hlR);
   return { group, wheels };
 }
+
+export interface PetFollowerRig {
+  group: THREE.Group;
+  body: THREE.Group;
+  head: THREE.Group;
+  tail: THREE.Mesh;
+  legs: THREE.Mesh[];
+  evolutionStage: PetEvolutionStage;
+  halo?: THREE.Group;
+  auraRing?: THREE.Mesh;
+  wings?: [THREE.Group, THREE.Group];
+  orbitCrystals?: THREE.Group;
+}
+
+/**
+ * Articulated 3D Pet Follower (Voxel Fox, Emerald Slime, or Void Pup):
+ * Bottom-center pivoted at y = 0 with soft ground contact shadow, animated legs,
+ * wagging tail, expressive eyes, and Stage 1 (Radiant) & Stage 2 (Ascendant) 3D evolutions.
+ */
+export function createPetFollowerModel(
+  species: PetSpeciesKey,
+  evolutionStage: PetEvolutionStage = 0,
+): PetFollowerRig {
+  const group = new THREE.Group();
+  const body = new THREE.Group();
+  const head = new THREE.Group();
+  const legs: THREE.Mesh[] = [];
+
+  // Ground contact shadow disc
+  const shadow = new THREE.Mesh(
+    new THREE.CircleGeometry(evolutionStage === 2 ? 0.88 : evolutionStage === 1 ? 0.78 : 0.68, 18),
+    new THREE.MeshBasicMaterial({ color: 0x050811, transparent: true, opacity: 0.34, depthWrite: false }),
+  );
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.03;
+  group.add(shadow);
+
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.2, metalness: 0.3 });
+  const radiantColor =
+    species === 'emerald_slime' ? 0x34d399 : species === 'void_pup' ? 0x38bdf8 : 0xfbbf24;
+  const ascendantColor =
+    species === 'emerald_slime' ? 0xa7f3d0 : species === 'void_pup' ? 0xe879f9 : 0xfef08a;
+
+  const radiantMat = new THREE.MeshStandardMaterial({
+    color: ascendantColor,
+    emissive: radiantColor,
+    emissiveIntensity: evolutionStage >= 2 ? 1.55 : 1.05,
+    roughness: 0.16,
+    metalness: 0.35,
+  });
+
+  let tail: THREE.Mesh;
+  let halo: THREE.Group | undefined;
+  let auraRing: THREE.Mesh | undefined;
+  let wings: [THREE.Group, THREE.Group] | undefined;
+  let orbitCrystals: THREE.Group | undefined;
+
+  if (species === 'emerald_slime') {
+    const outerMat = new THREE.MeshStandardMaterial({
+      color: evolutionStage >= 2 ? 0x2dd4bf : evolutionStage === 1 ? 0x10b981 : 0x10b981,
+      emissive: evolutionStage >= 2 ? 0x0d9488 : evolutionStage === 1 ? 0x059669 : 0x047857,
+      emissiveIntensity: evolutionStage >= 2 ? 0.65 : evolutionStage === 1 ? 0.48 : 0.35,
+      roughness: 0.16,
+      metalness: evolutionStage >= 1 ? 0.22 : 0.1,
+      transparent: true,
+      opacity: 0.88,
+    });
+    const coreMat = new THREE.MeshStandardMaterial({
+      color: evolutionStage >= 2 ? 0xfef08a : 0xa7f3d0,
+      emissive: evolutionStage >= 2 ? 0x2dd4bf : 0x34d399,
+      emissiveIntensity: evolutionStage >= 2 ? 1.6 : 1.15,
+      roughness: 0.14,
+    });
+    const leafMat = new THREE.MeshStandardMaterial({ color: 0x4ade80, roughness: 0.6 });
+
+    const blob = new THREE.Mesh(new THREE.BoxGeometry(0.96, 0.78, 0.96), outerMat);
+    blob.position.y = 0.42;
+    blob.castShadow = true;
+    const core = new THREE.Mesh(
+      new THREE.OctahedronGeometry(evolutionStage >= 1 ? 0.3 : 0.24, 0),
+      coreMat,
+    );
+    core.position.y = 0.44;
+    const eyeL = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.16, 0.08),
+      evolutionStage >= 2 ? radiantMat : eyeMat,
+    );
+    eyeL.position.set(-0.22, 0.5, 0.48);
+    const eyeR = eyeL.clone();
+    eyeR.position.x = 0.22;
+
+    const sproutStem = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.24, 0.08), leafMat);
+    sproutStem.position.set(0, 0.9, 0);
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.08, 0.18), leafMat);
+    leaf.position.set(0.14, 1.0, 0);
+    leaf.rotation.z = 0.28;
+    head.add(sproutStem, leaf);
+
+    if (evolutionStage >= 1) {
+      // Crystal Sovereign crown shard + twin emerald side prism buds
+      const crown = new THREE.Mesh(new THREE.OctahedronGeometry(0.2, 0), radiantMat);
+      crown.position.set(0, 1.16, 0);
+      const budL = new THREE.Mesh(new THREE.OctahedronGeometry(0.16, 0), coreMat);
+      budL.position.set(-0.56, 0.46, 0);
+      const budR = budL.clone();
+      budR.position.x = 0.56;
+      head.add(crown);
+      body.add(budL, budR);
+    }
+
+    tail = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 0.24), coreMat);
+    tail.position.set(0, 0.28, -0.56);
+
+    body.add(blob, core, eyeL, eyeR, head, tail);
+  } else {
+    const isVoid = species === 'void_pup';
+    const furColor = isVoid
+      ? evolutionStage >= 2
+        ? 0x4c1d95
+        : evolutionStage === 1
+          ? 0x3730a3
+          : 0x312e81
+      : evolutionStage >= 2
+        ? 0xf59e0b
+        : evolutionStage === 1
+          ? 0xfb923c
+          : 0xf97316;
+
+    const furMat = new THREE.MeshStandardMaterial({
+      color: furColor,
+      emissive: evolutionStage >= 2 ? (isVoid ? 0x6d28d9 : 0xd97706) : 0x000000,
+      emissiveIntensity: evolutionStage >= 2 ? 0.28 : 0,
+      roughness: evolutionStage >= 1 ? 0.55 : 0.76,
+      metalness: isVoid ? 0.26 : evolutionStage >= 2 ? 0.2 : 0.04,
+    });
+    const creamMat = new THREE.MeshStandardMaterial({
+      color: isVoid
+        ? evolutionStage >= 2
+          ? 0xf0abfc
+          : 0x818cf8
+        : evolutionStage >= 2
+          ? 0xfef9c3
+          : 0xfef3c7,
+      emissive: evolutionStage >= 1 ? (isVoid ? 0x6366f1 : 0xf59e0b) : 0x000000,
+      emissiveIntensity: evolutionStage >= 2 ? 0.45 : evolutionStage === 1 ? 0.2 : 0,
+      roughness: 0.55,
+    });
+    const collarMat = new THREE.MeshStandardMaterial({
+      color: isVoid ? 0x38bdf8 : 0xfbbf24,
+      emissive: isVoid ? 0x0284c7 : 0xd97706,
+      emissiveIntensity: evolutionStage >= 1 ? 1.25 : 0.85,
+      roughness: 0.22,
+    });
+    const darkPawMat = new THREE.MeshStandardMaterial({
+      color: isVoid ? 0x1e1b4b : 0x7c2d12,
+      roughness: 0.82,
+    });
+
+    // 4 articulated voxel legs
+    const legGeo = new THREE.BoxGeometry(0.18, 0.42, 0.18);
+    const legCoords: Array<[number, number]> = [
+      [-0.22, 0.34],
+      [0.22, 0.34],
+      [-0.22, -0.32],
+      [0.22, -0.32],
+    ];
+    for (const [lx, lz] of legCoords) {
+      const leg = new THREE.Mesh(legGeo, darkPawMat);
+      leg.position.set(lx, 0.21, lz);
+      leg.castShadow = true;
+      body.add(leg);
+      legs.push(leg);
+    }
+
+    // Torso, cream chest tuft & glowing collar
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.48, 0.98), furMat);
+    torso.position.set(0, 0.56, 0);
+    torso.castShadow = true;
+    const chest = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.36, 0.2), creamMat);
+    chest.position.set(0, 0.54, 0.48);
+    const collar = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.14, 0.24), collarMat);
+    collar.position.set(0, 0.78, 0.38);
+
+    // Head, snout, eyes & perky ears
+    head.position.set(0, 0.94, 0.46);
+    const skull = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.48, 0.54), furMat);
+    skull.castShadow = true;
+    const snout = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.2, 0.24), creamMat);
+    snout.position.set(0, -0.08, 0.34);
+    const nose = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.09, 0.08), eyeMat);
+    nose.position.set(0, -0.02, 0.46);
+    const eyeL = new THREE.Mesh(
+      new THREE.BoxGeometry(0.11, 0.12, 0.06),
+      isVoid || evolutionStage >= 2 ? radiantMat : eyeMat,
+    );
+    eyeL.position.set(-0.16, 0.06, 0.27);
+    const eyeR = eyeL.clone();
+    eyeR.position.x = 0.16;
+
+    const earGeo = new THREE.BoxGeometry(0.16, evolutionStage >= 1 ? 0.32 : 0.26, 0.12);
+    const earL = new THREE.Mesh(earGeo, isVoid ? darkPawMat : furMat);
+    earL.position.set(-0.2, 0.34, -0.04);
+    earL.rotation.z = isVoid ? 0.35 : 0.12;
+    const earR = new THREE.Mesh(earGeo, isVoid ? darkPawMat : furMat);
+    earR.position.set(0.2, 0.34, -0.04);
+    earR.rotation.z = isVoid ? -0.35 : -0.12;
+    head.add(skull, snout, nose, eyeL, eyeR, earL, earR);
+
+    // Stage 1+ Radiant Head Crest & Shoulder Armor/Rune Flair
+    if (evolutionStage >= 1) {
+      const crest = new THREE.Mesh(new THREE.OctahedronGeometry(0.13, 0), radiantMat);
+      crest.position.set(0, 0.26, 0.24);
+      head.add(crest);
+
+      const pauldronL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.2, 0.32), radiantMat);
+      pauldronL.position.set(-0.36, 0.72, 0.24);
+      const pauldronR = pauldronL.clone();
+      pauldronR.position.x = 0.36;
+      body.add(pauldronL, pauldronR);
+    }
+
+    // Fluffy / starlight wagging tail (multiplies into fanned spirit tails on evolution!)
+    tail = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.26, 0.72), furMat);
+    tail.position.set(0, 0.72, -0.72);
+    tail.rotation.x = 0.42;
+    const tailTip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.28, 0.28, 0.24),
+      evolutionStage >= 1 ? radiantMat : creamMat,
+    );
+    tailTip.position.set(0, 0, -0.32);
+    tail.add(tailTip);
+
+    if (evolutionStage >= 1) {
+      // Fan twin extra radiant spirit tails beside main tail (3 tails at Stage 1, 5 tails at Stage 2!)
+      const extraAngles = evolutionStage >= 2 ? [-0.52, -0.26, 0.26, 0.52] : [-0.34, 0.34];
+      for (const ang of extraAngles) {
+        const subTail = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.19, 0.66), furMat);
+        subTail.position.set(Math.sin(ang) * 0.26, 0.05, -0.08);
+        subTail.rotation.y = ang;
+        const subTip = new THREE.Mesh(new THREE.BoxGeometry(0.21, 0.21, 0.22), radiantMat);
+        subTip.position.set(0, 0, -0.3);
+        subTail.add(subTip);
+        tail.add(subTail);
+      }
+    }
+
+    body.add(torso, chest, collar, head, tail);
+  }
+
+  // Stage 1+: Ground Radiant Aura Ring + Floating Crown Halo
+  if (evolutionStage >= 1) {
+    auraRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.64, evolutionStage >= 2 ? 0.88 : 0.78, 28),
+      new THREE.MeshBasicMaterial({
+        color: radiantColor,
+        transparent: true,
+        opacity: evolutionStage >= 2 ? 0.58 : 0.42,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+      }),
+    );
+    auraRing.rotation.x = -Math.PI / 2;
+    auraRing.position.y = 0.18;
+    group.add(auraRing);
+
+    halo = new THREE.Group();
+    halo.position.set(0, species === 'emerald_slime' ? 1.48 : 1.62, species === 'emerald_slime' ? 0 : 0.42);
+    const innerHalo = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.036, 8, 20), radiantMat);
+    innerHalo.rotation.x = Math.PI / 2;
+    halo.add(innerHalo);
+
+    if (evolutionStage >= 2) {
+      const outerHalo = new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.028, 8, 24), radiantMat);
+      outerHalo.rotation.x = Math.PI / 2.6;
+      outerHalo.rotation.y = 0.4;
+      halo.add(outerHalo);
+    }
+    body.add(halo);
+  }
+
+  // Stage 2 (Ascendant): Twin Articulated Radiant Energy Wings + 3 Orbiting Runestone Crystals
+  if (evolutionStage >= 2) {
+    const wingMat = new THREE.MeshStandardMaterial({
+      color: ascendantColor,
+      emissive: radiantColor,
+      emissiveIntensity: 1.25,
+      roughness: 0.2,
+      transparent: true,
+      opacity: 0.88,
+    });
+    const makeWing = (side: -1 | 1): THREE.Group => {
+      const wg = new THREE.Group();
+      wg.position.set(side * 0.34, species === 'emerald_slime' ? 0.58 : 0.78, -0.04);
+      const blade1 = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.14, 0.32), wingMat);
+      blade1.position.set(side * 0.34, 0.1, -0.06);
+      blade1.rotation.z = side * 0.28;
+      const blade2 = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.11, 0.22), radiantMat);
+      blade2.position.set(side * 0.54, 0.28, -0.14);
+      blade2.rotation.z = side * 0.48;
+      const blade3 = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.09, 0.18), wingMat);
+      blade3.position.set(side * 0.24, -0.04, -0.18);
+      blade3.rotation.z = side * 0.12;
+      wg.add(blade1, blade2, blade3);
+      return wg;
+    };
+    const leftWing = makeWing(-1);
+    const rightWing = makeWing(1);
+    body.add(leftWing, rightWing);
+    wings = [leftWing, rightWing];
+
+    orbitCrystals = new THREE.Group();
+    orbitCrystals.position.y = 0.88;
+    for (let i = 0; i < 3; i++) {
+      const ang = (i / 3) * Math.PI * 2;
+      const shard = new THREE.Mesh(new THREE.OctahedronGeometry(0.11, 0), radiantMat);
+      shard.position.set(Math.cos(ang) * 0.92, Math.sin(i * 1.4) * 0.16, Math.sin(ang) * 0.92);
+      orbitCrystals.add(shard);
+    }
+    body.add(orbitCrystals);
+  }
+
+  group.add(body);
+  return { group, body, head, tail, legs, evolutionStage, halo, auraRing, wings, orbitCrystals };
+}
+
+export interface SiegeTrebuchetModel {
+  group: THREE.Group;
+  armPivot: THREE.Group;
+  boulderMesh: THREE.Mesh;
+}
+
+/**
+ * 3D Imperial Siege Trebuchet (Voxel Realms RPG Castle Warfare):
+ * Timber A-frame trestle, iron-rimmed wheels, weighted ballast box,
+ * pivoting throwing arm, and glowing flaming obsidian siege boulder.
+ */
+export function createSiegeTrebuchetModel(): SiegeTrebuchetModel {
+  const group = new THREE.Group();
+  const timberMat = new THREE.MeshStandardMaterial({ color: 0x6b4226, roughness: 0.88, metalness: 0.06 });
+  const ironMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.45, metalness: 0.72 });
+  const goldTrimMat = new THREE.MeshStandardMaterial({
+    color: 0xf59e0b,
+    emissive: 0xb45309,
+    emissiveIntensity: 0.55,
+    roughness: 0.3,
+    metalness: 0.65,
+  });
+  const flameBoulderMat = new THREE.MeshStandardMaterial({
+    color: 0xf97316,
+    emissive: 0xea580c,
+    emissiveIntensity: 1.4,
+    roughness: 0.4,
+  });
+
+  // Ground contact shadow
+  const shadow = new THREE.Mesh(
+    new THREE.CircleGeometry(3.4, 18),
+    new THREE.MeshBasicMaterial({ color: 0x050811, transparent: true, opacity: 0.32, depthWrite: false }),
+  );
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.05;
+  group.add(shadow);
+
+  // Base timber skids & crossbeams
+  const skidL = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.45, 5.2), timberMat);
+  skidL.position.set(-1.35, 0.48, 0);
+  skidL.castShadow = true;
+  const skidR = skidL.clone();
+  skidR.position.x = 1.35;
+  const crossF = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.42, 0.45), timberMat);
+  crossF.position.set(0, 0.52, 2.0);
+  const crossB = crossF.clone();
+  crossB.position.z = -2.0;
+  group.add(skidL, skidR, crossF, crossB);
+
+  // 4 iron-bound timber wheels
+  const wheelGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.28, 12);
+  wheelGeo.rotateZ(Math.PI / 2);
+  for (const [wx, wz] of [
+    [-1.68, 1.85],
+    [1.68, 1.85],
+    [-1.68, -1.85],
+    [1.68, -1.85],
+  ]) {
+    const wheel = new THREE.Mesh(wheelGeo, ironMat);
+    wheel.position.set(wx, 0.55, wz);
+    wheel.castShadow = true;
+    group.add(wheel);
+  }
+
+  // Twin A-frame support uprights + crossbar axle
+  for (const side of [-1, 1]) {
+    const strutF = new THREE.Mesh(new THREE.BoxGeometry(0.32, 3.6, 0.32), timberMat);
+    strutF.position.set(side * 1.15, 2.2, 0.72);
+    strutF.rotation.x = -0.28;
+    strutF.castShadow = true;
+    const strutB = new THREE.Mesh(new THREE.BoxGeometry(0.32, 3.6, 0.32), timberMat);
+    strutB.position.set(side * 1.15, 2.2, -0.72);
+    strutB.rotation.x = 0.28;
+    strutB.castShadow = true;
+    group.add(strutF, strutB);
+  }
+
+  const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 2.8, 10), ironMat);
+  axle.rotation.z = Math.PI / 2;
+  axle.position.set(0, 3.65, 0);
+  group.add(axle);
+
+  // Imperial banner pole on side
+  const bannerPole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 4.4, 6), ironMat);
+  bannerPole.position.set(-1.55, 2.4, -2.05);
+  const bannerCloth = new THREE.Mesh(
+    new THREE.BoxGeometry(0.08, 1.45, 0.95),
+    new THREE.MeshStandardMaterial({ color: 0x0ea5e9, emissive: 0x0284c7, emissiveIntensity: 0.4, roughness: 0.6 }),
+  );
+  bannerCloth.position.set(-1.55, 3.8, -1.55);
+  group.add(bannerPole, bannerCloth);
+
+  // Pivoting throwing arm + counterweight + flaming boulder cup
+  const armPivot = new THREE.Group();
+  armPivot.position.set(0, 3.65, 0);
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.32, 5.6), timberMat);
+  beam.position.set(0, 0, -1.0);
+  beam.castShadow = true;
+  const band = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.38, 0.45), goldTrimMat);
+  band.position.set(0, 0, 0);
+  const counterweight = new THREE.Mesh(new THREE.BoxGeometry(1.15, 1.05, 1.05), ironMat);
+  counterweight.position.set(0, -0.78, 1.55);
+  counterweight.castShadow = true;
+  const cup = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.22, 0.82), ironMat);
+  cup.position.set(0, 0.16, -3.55);
+  const boulderMesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.46, 0), flameBoulderMat);
+  boulderMesh.position.set(0, 0.56, -3.55);
+  armPivot.add(beam, band, counterweight, cup, boulderMesh);
+  armPivot.rotation.x = 0.52; // Cocked ready to fire!
+  group.add(armPivot);
+
+  return { group, armPivot, boulderMesh };
+}
+
+export interface SiegeTroopRig {
+  group: THREE.Group;
+  leftLeg: THREE.Mesh;
+  rightLeg: THREE.Mesh;
+  rightArm: THREE.Group;
+  branch: TroopBranch;
+}
+
+/**
+ * 3D Allied Siege Cohort Soldier (Shieldbearer, Shooter, or Bomber from Voxel Realms):
+ * Bottom-center grounded at y = 0 with distinct branch silhouettes & glowing Dawn faction trim.
+ */
+export function createSiegeTroopModel(branch: TroopBranch): SiegeTroopRig {
+  const group = new THREE.Group();
+  const shadow = new THREE.Mesh(
+    new THREE.CircleGeometry(0.55, 14),
+    new THREE.MeshBasicMaterial({ color: 0x050811, transparent: true, opacity: 0.3, depthWrite: false }),
+  );
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.04;
+  group.add(shadow);
+
+  const primaryHex = branch === 'shieldbearer' ? 0x1d4ed8 : branch === 'shooter' ? 0x047857 : 0xb45309;
+  const accentHex = branch === 'shieldbearer' ? 0x38bdf8 : branch === 'shooter' ? 0x34d399 : 0xfb923c;
+
+  const armorMat = new THREE.MeshStandardMaterial({ color: primaryHex, roughness: 0.52, metalness: 0.35 });
+  const trimMat = new THREE.MeshStandardMaterial({
+    color: accentHex,
+    emissive: accentHex,
+    emissiveIntensity: 0.65,
+    roughness: 0.28,
+  });
+  const skinMat = new THREE.MeshStandardMaterial({ color: 0xf1c27d, roughness: 0.78 });
+  const bootMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 });
+
+  const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.62, 0.24), bootMat);
+  leftLeg.position.set(-0.16, 0.31, 0);
+  const rightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.62, 0.24), bootMat);
+  rightLeg.position.set(0.16, 0.31, 0);
+
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.72, 0.36), armorMat);
+  torso.position.y = 0.96;
+  torso.castShadow = true;
+
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.44, 0.44), skinMat);
+  head.position.y = 1.54;
+  const helm = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.22, 0.5), armorMat);
+  helm.position.y = 1.72;
+  const crest = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.2, 0.42), trimMat);
+  crest.position.y = 1.88;
+
+  const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.56, 0.2), armorMat);
+  leftArm.position.set(-0.42, 0.96, 0);
+
+  const rightArm = new THREE.Group();
+  rightArm.position.set(0.42, 1.18, 0);
+  const rArmMesh = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.56, 0.2), armorMat);
+  rArmMesh.position.y = -0.22;
+  rightArm.add(rArmMesh);
+
+  if (branch === 'shieldbearer') {
+    // Large glowing Dawn kite shield on left arm + broadsword on right
+    const shield = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.88, 0.62), trimMat);
+    shield.position.set(-0.56, 0.92, 0.18);
+    const sword = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.85, 0.12), trimMat);
+    sword.position.set(0, -0.45, 0.38);
+    sword.rotation.x = Math.PI / 2.2;
+    rightArm.add(sword);
+    group.add(shield);
+  } else if (branch === 'shooter') {
+    // Glowing emerald recurve bow held forward
+    const bow = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.045, 6, 12, Math.PI), trimMat);
+    bow.position.set(0, -0.22, 0.34);
+    bow.rotation.y = Math.PI / 2;
+    bow.rotation.z = -Math.PI / 2;
+    rightArm.add(bow);
+  } else {
+    // Bomber ember keg backpack + glowing fire orb in hand
+    const keg = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.56, 8), trimMat);
+    keg.position.set(0, 1.0, -0.32);
+    const bomb = new THREE.Mesh(new THREE.DodecahedronGeometry(0.18, 0), trimMat);
+    bomb.position.set(0, -0.42, 0.28);
+    rightArm.add(bomb);
+    group.add(keg);
+  }
+
+  group.add(leftLeg, rightLeg, torso, head, helm, crest, leftArm, rightArm);
+  return { group, leftLeg, rightLeg, rightArm, branch };
+}
+
 

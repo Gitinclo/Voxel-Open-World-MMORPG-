@@ -12,7 +12,10 @@ import {
   createIslandTransitShuttle,
   createLeoOrbModel,
   createLoraBioLab,
+  createPetFollowerModel,
   createRainyBookstoreCabin,
+  createSiegeTrebuchetModel,
+  createSiegeTroopModel,
   createSlimeEnemy,
   createSpamDroneModel,
   createStoneBumpTexture,
@@ -20,6 +23,9 @@ import {
   type EmeraldWaterfallModel,
   type HumanoidRig,
   type IslandVillagerRig,
+  type PetFollowerRig,
+  type SiegeTrebuchetModel,
+  type SiegeTroopRig,
   type TransitShuttleModel,
 } from './models';
 import {
@@ -27,20 +33,38 @@ import {
   HERO_CLASSES,
   INITIAL_INVENTORY,
   INITIAL_LORA,
+  INITIAL_PET,
   INITIAL_QUESTS,
   INITIAL_SKILLS,
+  INITIAL_WARFARE,
   LINEAGES,
+  PET_EVOLUTION_STAGES,
+  PET_SPECIES_SPECS,
   REALM_SHARDS,
+  SIEGE_FORMATIONS,
+  TROOP_SPECS,
+  WAR_COMMANDERS,
   advanceCastleCapture,
   applyCraftRecipe,
   applyXpGain,
   attemptCultivationBreakthrough,
+  attemptImperialCastleUpgrade,
+  attemptTrainSiegeTroops,
   computeHeroPowerStats,
   computePlayerDamage,
+  computeWarfarePower,
+  feedPetState,
+  getImperialCastleSpec,
+  getPetFormTitle,
+  getPetStatusModifiers,
   isValidSavePayload,
+  petCompanionState,
+  resolveTerritoryRally,
+  tickPetState,
   type CraftRecipeKey,
 } from './rules';
 import type {
+  CastleWarfareState,
   ChatMessage,
   CinemaChannel,
   FloatingLabel,
@@ -52,10 +76,17 @@ import type {
   LineageId,
   LoraWeights,
   MinimapBlip,
+  PetEvolutionStage,
+  PetSpeciesKey,
+  PetState,
   PopupAdItem,
   QuestProgress,
   SavePayload,
+  SiegeFormationType,
   SkillLevels,
+  TerritorySectorCode,
+  TroopBranch,
+  WarCommanderId,
   WeatherMode,
 } from './types';
 import {
@@ -347,6 +378,43 @@ export class ShadowVoxelEngine {
   private liraAtkCd = 0;
   private liraHealCd = 0;
   private leoOrb!: { group: THREE.Group; ringA: THREE.Mesh; ringB: THREE.Mesh };
+  // 3D Pet Follower (Kibo — Voxel Fox / Emerald Slime / Void Pup)
+  private pet: PetState = { ...INITIAL_PET };
+  private petRig!: PetFollowerRig;
+  // Voxel Realms RPG Castle Warfare (Repo #4: Imperial Castle, 3D Trebuchet & Formation Siege Cohort)
+  private warfare: CastleWarfareState = {
+    ...INITIAL_WARFARE,
+    troops: { ...INITIAL_WARFARE.troops },
+    sectors: { ...INITIAL_WARFARE.sectors },
+  };
+  private trebuchet!: SiegeTrebuchetModel;
+  private readonly trebuchetPos = { x: 14.5, z: 22.5 };
+  private trebuchetAnimTimer = 0;
+  private siegeBoulders: Array<{
+    mesh: THREE.Mesh;
+    startX: number;
+    startY: number;
+    startZ: number;
+    targetX: number;
+    targetY: number;
+    targetZ: number;
+    t: number;
+    duration: number;
+  }> = [];
+  private siegeCohort: Array<{
+    rig: SiegeTroopRig;
+    branch: TroopBranch;
+    x: number;
+    z: number;
+    rotY: number;
+    atkCd: number;
+    slotIdx: number;
+  }> = [];
+  private petX = 2.4;
+  private petZ = 13.8;
+  private petRotY = Math.PI;
+  private petJumpTimer = 0;
+  private petWalkPhase = 0;
   private loreNpcs: Array<{ name: string; line: string; x: number; z: number; rig: HumanoidRig }> = [];
   private allyAdventurers: Array<{
     name: string;
@@ -791,6 +859,16 @@ export class ShadowVoxelEngine {
     buildCastle('blue', 'Dawn Citadel', LANDMARKS.blueCastle.x, LANDMARKS.blueCastle.z, 'blue');
     buildCastle('red', 'Obsidian Citadel', LANDMARKS.redCastle.x, LANDMARKS.redCastle.z, 'red');
 
+    // 3b. Voxel Realms Imperial Siege Trebuchet overlooking road to Obsidian Citadel
+    this.trebuchet = createSiegeTrebuchetModel();
+    const trebY = getTerrainHeight(this.trebuchetPos.x, this.trebuchetPos.z);
+    this.trebuchet.group.position.set(this.trebuchetPos.x, trebY, this.trebuchetPos.z);
+    this.trebuchet.group.rotation.y = Math.atan2(
+      LANDMARKS.redCastle.x - this.trebuchetPos.x,
+      LANDMARKS.redCastle.z - this.trebuchetPos.z,
+    );
+    this.scene.add(this.trebuchet.group);
+
     // 4. Ashfield ShadowRealm Rift Monument (Malakor World Boss Lair)
     const riftGroup = new THREE.Group();
     riftGroup.position.set(LANDMARKS.malakor.x, getTerrainHeight(LANDMARKS.malakor.x, LANDMARKS.malakor.z), LANDMARKS.malakor.z);
@@ -1132,6 +1210,17 @@ export class ShadowVoxelEngine {
     this.leoOrb = createLeoOrbModel();
     this.leoOrb.group.position.set(this.px + 1.4, this.py + 2.8, this.pz);
     this.scene.add(this.leoOrb.group);
+
+    // 3D Pet Follower Companion (trots beside player right heel)
+    const initPetScale = PET_EVOLUTION_STAGES[this.pet.evolutionStage]?.scale ?? 1.15;
+    this.petRig = createPetFollowerModel(this.pet.species, this.pet.evolutionStage);
+    this.petRig.group.scale.setScalar(initPetScale);
+    this.petRig.group.position.set(this.petX, getTerrainHeight(this.petX, this.petZ), this.petZ);
+    this.petRig.group.rotation.y = this.petRotY;
+    this.scene.add(this.petRig.group);
+
+    // Voxel Realms Live 3D Allied Siege Cohort (marching in active tactical formation)
+    this.rebuildSiegeCohortMeshes();
 
     // Rainy Bookstore Lore NPCs (Lin_Jie & Ji_Zhixiu from MemeForge v2.3.0)
     const npcDefs = [
@@ -1698,6 +1787,17 @@ export class ShadowVoxelEngine {
     this.inBuggy = false;
     this.inShuttle = false;
     this.isFishing = false;
+    this.pet = { ...INITIAL_PET };
+    this.petX = 2.4;
+    this.petZ = 13.8;
+    this.petJumpTimer = 0;
+    this.rebuildPetModel(this.pet.species, this.pet.evolutionStage);
+    this.warfare = {
+      ...INITIAL_WARFARE,
+      troops: { ...INITIAL_WARFARE.troops },
+      sectors: { ...INITIAL_WARFARE.sectors },
+    };
+    this.rebuildSiegeCohortMeshes();
     this.clearPopups();
     this.startGame(this.playerName, this.classKey, this.lineageId, this.shardId);
   }
@@ -1813,10 +1913,324 @@ export class ShadowVoxelEngine {
     );
     this.camera.position.set(snapCx, snapCy, snapCz);
     this.camera.lookAt(this.px, this.py + 2.2, this.pz);
+    // Bring 3D pet follower alongside hero on teleport
+    this.petX = this.px + 2.3;
+    this.petZ = this.pz + 1.4;
+    this.petRig.group.position.set(this.petX, getTerrainHeight(this.petX, this.petZ), this.petZ);
     this.audio.play('shadow');
     this.spawnParticles(this.px, this.py + 1.8, this.pz, 0x38bdf8, 18, 10);
     this.cb.onToast(`Teleported to ${lm.name}`);
     this.emitHudSnapshot();
+  }
+
+  private rebuildPetModel(species: PetSpeciesKey, evolutionStage: PetEvolutionStage = this.pet.evolutionStage): void {
+    if (this.petRig) {
+      this.scene.remove(this.petRig.group);
+    }
+    const stageSpec = PET_EVOLUTION_STAGES[evolutionStage] ?? PET_EVOLUTION_STAGES[0];
+    this.petRig = createPetFollowerModel(species, evolutionStage);
+    this.petRig.group.scale.setScalar(stageSpec.scale);
+    const py = this.inDungeon
+      ? DUNGEON_CENTER.y
+      : Math.max(WATER_LEVEL + 0.05, getTerrainHeight(this.petX, this.petZ));
+    this.petRig.group.position.set(this.petX, py, this.petZ);
+    this.petRig.group.rotation.y = this.petRotY;
+    this.scene.add(this.petRig.group);
+  }
+
+  private triggerPetEvolutionCelebration(newStage: PetEvolutionStage): string {
+    const stageSpec = PET_EVOLUTION_STAGES[newStage] ?? PET_EVOLUTION_STAGES[1];
+    const formTitle = getPetFormTitle(this.pet.species, newStage);
+    this.rebuildPetModel(this.pet.species, newStage);
+    this.petJumpTimer = 0.65;
+    this.trauma = Math.min(1, this.trauma + 0.25);
+    this.audio.play('levelup');
+    const py = this.inDungeon ? DUNGEON_CENTER.y : getTerrainHeight(this.petX, this.petZ);
+    this.spawnParticles(this.petX, py + 1.3, this.petZ, 0xfacc15, 24, 12);
+    this.spawnParticles(this.petX, py + 1.5, this.petZ, newStage >= 2 ? 0xe879f9 : 0x38bdf8, 22, 11);
+    this.pushFloatLabel(this.petX, py + 2.6, this.petZ, `★ EVOLVED: ${formTitle}!`, '#fde047');
+    return `★ EVOLUTION! ${this.pet.name} ascended to Stage ${newStage} ${stageSpec.tierName} (${formTitle}) — +${stageSpec.hpRegenPerSec.toFixed(1)} HP/s, +${stageSpec.atkBonusPct}% ATK, +${stageSpec.xpBonusPct}% XP, +${stageSpec.speedBonusPct}% Speed!`;
+  }
+
+  public feedPet(food: 'apple' | 'fish' | 'treat'): { ok: boolean; message: string } {
+    if (food === 'apple') {
+      if (this.inventory.apples < 1) {
+        const msg = 'No Apples in inventory — gather Apples in Whispering Woods or give a Treat (5 Gold).';
+        this.cb.onToast(msg);
+        return { ok: false, message: msg };
+      }
+      this.inventory.apples -= 1;
+    } else if (food === 'fish') {
+      if (this.inventory.fish < 1) {
+        const msg = 'No Fish in inventory — press [F] at the Ashen Sea to catch Fish!';
+        this.cb.onToast(msg);
+        return { ok: false, message: msg };
+      }
+      this.inventory.fish -= 1;
+    } else {
+      if (this.gold < 5) {
+        const msg = 'Need 5 Gold to dispense a L.E.O. Kibble Treat.';
+        this.cb.onToast(msg);
+        return { ok: false, message: msg };
+      }
+      this.gold -= 5;
+    }
+
+    const prevLevel = this.pet.level;
+    const prevStage = this.pet.evolutionStage;
+    this.pet = feedPetState(this.pet, food);
+    const evolved = this.pet.evolutionStage > prevStage;
+    let message: string;
+    if (evolved) {
+      message = this.triggerPetEvolutionCelebration(this.pet.evolutionStage);
+    } else {
+      this.petJumpTimer = 0.65;
+      this.audio.play(this.pet.level > prevLevel ? 'levelup' : 'adblock');
+      this.spawnParticles(this.petX, getTerrainHeight(this.petX, this.petZ) + 1.2, this.petZ, 0xfbbf24, 16, 8);
+      this.pushFloatLabel(
+        this.petX,
+        getTerrainHeight(this.petX, this.petZ) + 2.1,
+        this.petZ,
+        this.pet.level > prevLevel ? `${this.pet.name} Bond Lv ${this.pet.level}!` : `Yum! +Hunger`,
+        '#fde047',
+      );
+      const label = food === 'fish' ? 'Ashen Fish' : food === 'apple' ? 'Crisp Apple' : 'L.E.O. Treat';
+      message =
+        this.pet.level > prevLevel
+          ? `Fed ${this.pet.name} a ${label}! Bond rose to Lv ${this.pet.level} (${this.pet.mood}).`
+          : `Fed ${this.pet.name} a ${label}! Hunger ${Math.round(this.pet.hunger)}%, Happiness ${Math.round(this.pet.happiness)}%.`;
+    }
+    this.cb.onToast(message);
+    this.emitHudSnapshot();
+    return { ok: true, message };
+  }
+
+  public petCompanion(): { ok: boolean; message: string } {
+    const prevLevel = this.pet.level;
+    const prevStage = this.pet.evolutionStage;
+    this.pet = petCompanionState(this.pet);
+    const evolved = this.pet.evolutionStage > prevStage;
+    let message: string;
+    if (evolved) {
+      message = this.triggerPetEvolutionCelebration(this.pet.evolutionStage);
+    } else {
+      this.petJumpTimer = 0.65;
+      this.audio.play(this.pet.level > prevLevel ? 'levelup' : 'adblock');
+      this.spawnParticles(this.petX, getTerrainHeight(this.petX, this.petZ) + 1.2, this.petZ, 0xf472b6, 16, 8);
+      this.pushFloatLabel(
+        this.petX,
+        getTerrainHeight(this.petX, this.petZ) + 2.1,
+        this.petZ,
+        this.pet.level > prevLevel ? `${this.pet.name} Bond Lv ${this.pet.level}!` : `+18 Happiness`,
+        '#f472b6',
+      );
+      message =
+        this.pet.level > prevLevel
+          ? `${this.pet.name} leaped with joy! Bond Level ${this.pet.level} reached!`
+          : `You petted ${this.pet.name}! Happiness is now ${Math.round(this.pet.happiness)}% (${this.pet.mood}).`;
+    }
+    this.cb.onToast(message);
+    this.emitHudSnapshot();
+    return { ok: true, message };
+  }
+
+  public setPetSpecies(species: PetSpeciesKey): void {
+    if (!(species in PET_SPECIES_SPECS) || this.pet.species === species) return;
+    this.pet = { ...this.pet, species };
+    this.rebuildPetModel(species, this.pet.evolutionStage);
+    this.petJumpTimer = 0.55;
+    this.audio.play('shadow');
+    this.spawnParticles(this.petX, getTerrainHeight(this.petX, this.petZ) + 1.1, this.petZ, 0x38bdf8, 18, 9);
+    const formTitle = getPetFormTitle(species, this.pet.evolutionStage);
+    this.cb.onToast(`${this.pet.name} morphed into ${formTitle}!`);
+    this.emitHudSnapshot();
+  }
+
+  public renamePet(rawName: string): void {
+    const clean = rawName.trim().slice(0, 18);
+    if (!clean) return;
+    this.pet = { ...this.pet, name: clean };
+    this.cb.onToast(`Companion renamed to ${clean}`);
+    this.emitHudSnapshot();
+  }
+
+  // =========================================================================
+  // VOXEL REALMS CASTLE WARFARE COMMANDS (Imperial Castle, Barracks, Trebuchet, Rallies)
+  // =========================================================================
+
+  private rebuildSiegeCohortMeshes(): void {
+    for (const unit of this.siegeCohort) {
+      this.scene.remove(unit.rig.group);
+    }
+    this.siegeCohort = [];
+
+    const branches: TroopBranch[] = [];
+    const sbSlots = Math.min(2, this.warfare.troops.shieldbearer);
+    const shSlots = Math.min(2, this.warfare.troops.shooter);
+    const bmSlots = Math.min(2, this.warfare.troops.bomber);
+    for (let i = 0; i < sbSlots; i++) branches.push('shieldbearer');
+    for (let i = 0; i < shSlots; i++) branches.push('shooter');
+    for (let i = 0; i < bmSlots; i++) branches.push('bomber');
+
+    branches.forEach((branch, idx) => {
+      const rig = createSiegeTroopModel(branch);
+      const angle = (idx / Math.max(1, branches.length)) * Math.PI * 2;
+      const ux = this.px + Math.cos(angle) * 4.5;
+      const uz = this.pz + Math.sin(angle) * 4.5;
+      rig.group.position.set(ux, Math.max(WATER_LEVEL + 0.05, getTerrainHeight(ux, uz)), uz);
+      rig.group.visible = this.warfare.cohortDeployed && !this.inDungeon;
+      this.scene.add(rig.group);
+      this.siegeCohort.push({
+        rig,
+        branch,
+        x: ux,
+        z: uz,
+        rotY: this.pRotY,
+        atkCd: 0.4 + idx * 0.25,
+        slotIdx: idx,
+      });
+    });
+  }
+
+  public upgradeImperialCastle(): { ok: boolean; message: string } {
+    const res = attemptImperialCastleUpgrade(this.warfare, this.gold, this.spiritStones);
+    if (!res.ok) {
+      const msg = res.reason || 'Cannot upgrade Imperial Castle yet.';
+      this.cb.onToast(msg);
+      return { ok: false, message: msg };
+    }
+    this.warfare = res.warfare;
+    this.gold = res.gold;
+    this.spiritStones = res.spiritStones;
+    const spec = getImperialCastleSpec(this.warfare.castleLevel);
+    // Physically scale Dawn Citadel crystal & ring aura with Imperial Castle level!
+    const dawnCastle = this.castles.find((c) => c.id === 'blue');
+    if (dawnCastle) {
+      const scale = 1 + (this.warfare.castleLevel - 1) * 0.14;
+      dawnCastle.crystal.scale.setScalar(scale);
+      this.spawnParticles(dawnCastle.x, dawnCastle.y + 6, dawnCastle.z, 0xfacc15, 28, 14);
+    }
+    this.audio.play('levelup');
+    this.spawnParticles(this.px, this.py + 2, this.pz, 0xfbbf24, 24, 12);
+    const msg = `Imperial Castle upgraded to Lv ${spec.level} (${spec.era}) — Max Barracks ${spec.maxTroops}!`;
+    this.cb.onToast(msg);
+    this.emitHudSnapshot();
+    return { ok: true, message: msg };
+  }
+
+  public trainSiegeTroops(branch: TroopBranch, count: number): { ok: boolean; message: string } {
+    const res = attemptTrainSiegeTroops(this.warfare, branch, count, this.gold);
+    if (!res.ok) {
+      const msg = res.reason || 'Unable to train troops.';
+      this.cb.onToast(msg);
+      return { ok: false, message: msg };
+    }
+    this.warfare = res.warfare;
+    this.gold = res.gold;
+    this.rebuildSiegeCohortMeshes();
+    this.audio.play('adblock');
+    const msg = `Trained +${count} ${TROOP_SPECS[branch].label} (Army Power: ${computeWarfarePower(this.warfare)})`;
+    this.cb.onToast(msg);
+    this.emitHudSnapshot();
+    return { ok: true, message: msg };
+  }
+
+  public setSiegeFormation(formation: SiegeFormationType): void {
+    if (!(formation in SIEGE_FORMATIONS) || this.warfare.formation === formation) return;
+    this.warfare = { ...this.warfare, formation };
+    this.audio.play('shadow');
+    this.cb.onToast(`Siege Formation: ${SIEGE_FORMATIONS[formation].label}`);
+    this.emitHudSnapshot();
+  }
+
+  public setWarCommander(commanderId: WarCommanderId): void {
+    if (!(commanderId in WAR_COMMANDERS) || this.warfare.commanderId === commanderId) return;
+    this.warfare = { ...this.warfare, commanderId };
+    this.audio.play('adblock');
+    this.cb.onToast(`Active War Commander: ${WAR_COMMANDERS[commanderId].name}`);
+    this.emitHudSnapshot();
+  }
+
+  public toggleCohortDeployed(): void {
+    this.warfare = { ...this.warfare, cohortDeployed: !this.warfare.cohortDeployed };
+    for (const u of this.siegeCohort) {
+      u.rig.group.visible = this.warfare.cohortDeployed && !this.inDungeon;
+    }
+    this.audio.play('shadow');
+    this.cb.onToast(
+      this.warfare.cohortDeployed
+        ? `3D Siege Cohort deployed in ${SIEGE_FORMATIONS[this.warfare.formation].label} formation!`
+        : '3D Siege Cohort garrisoned inside Imperial Castle.',
+    );
+    this.emitHudSnapshot();
+  }
+
+  public fireSiegeTrebuchet(): { ok: boolean; message: string } {
+    if (this.warfare.trebuchetCooldownSec > 0.2) {
+      const msg = `Imperial Trebuchet reloading (${Math.ceil(this.warfare.trebuchetCooldownSec)}s)...`;
+      this.cb.onToast(msg);
+      return { ok: false, message: msg };
+    }
+    this.warfare = { ...this.warfare, trebuchetCooldownSec: 6.0 };
+    this.trebuchetAnimTimer = 0.65;
+    if (this.trebuchet) {
+      this.trebuchet.boulderMesh.visible = false;
+    }
+    const startY = getTerrainHeight(this.trebuchetPos.x, this.trebuchetPos.z) + 5.8;
+    const targetX = LANDMARKS.redCastle.x + (Math.random() - 0.5) * 6;
+    const targetZ = LANDMARKS.redCastle.z + (Math.random() - 0.5) * 6;
+    const targetY = getTerrainHeight(targetX, targetZ) + 2.5;
+    const mesh = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(0.68, 0),
+      new THREE.MeshStandardMaterial({
+        color: 0xf97316,
+        emissive: 0xea580c,
+        emissiveIntensity: 1.7,
+        roughness: 0.35,
+      }),
+    );
+    mesh.position.set(this.trebuchetPos.x, startY, this.trebuchetPos.z);
+    this.scene.add(mesh);
+    this.siegeBoulders.push({
+      mesh,
+      startX: this.trebuchetPos.x,
+      startY,
+      startZ: this.trebuchetPos.z,
+      targetX,
+      targetY,
+      targetZ,
+      t: 0,
+      duration: 1.45,
+    });
+    this.audio.play('ascendant');
+    this.trauma = Math.min(1, this.trauma + 0.3);
+    this.spawnParticles(this.trebuchetPos.x, startY, this.trebuchetPos.z, 0xf97316, 18, 10);
+    const msg = 'Imperial Trebuchet fired! Flaming siege boulder arcing into Obsidian Citadel!';
+    this.cb.onToast(msg);
+    this.emitHudSnapshot();
+    return { ok: true, message: msg };
+  }
+
+  public launchTerritoryRally(sector: TerritorySectorCode): { ok: boolean; message: string } {
+    const res = resolveTerritoryRally(this.warfare, sector);
+    if (!res.ok) {
+      const msg = res.reason || `Cannot rally Sector ${sector}.`;
+      this.cb.onToast(msg);
+      return { ok: false, message: msg };
+    }
+    this.warfare = res.warfare;
+    this.gold += res.goldReward;
+    this.gainXp(res.xpReward);
+    const redCastle = this.castles.find((c) => c.id === 'red');
+    if (redCastle && redCastle.owner !== 'blue') {
+      redCastle.progress = Math.min(99, redCastle.progress + res.obsidianSiegeDelta);
+    }
+    this.audio.play('levelup');
+    this.spawnParticles(this.px, this.py + 2.2, this.pz, 0x38bdf8, 22, 11);
+    const msg = `Sector ${sector} Rally Victory → ${res.newOwner}! (+${res.goldReward} Gold, +${res.xpReward} XP, +${res.obsidianSiegeDelta}% Obsidian Siege)`;
+    this.cb.onToast(msg);
+    this.emitHudSnapshot();
+    return { ok: true, message: msg };
   }
 
   public craft(recipe: CraftRecipeKey): { ok: boolean; message: string } {
@@ -2033,6 +2447,12 @@ export class ShadowVoxelEngine {
         inventory: { ...this.inventory },
         lora: { ...this.lora },
         quests: { ...this.quests },
+        pet: { ...this.pet },
+        warfare: {
+          ...this.warfare,
+          troops: { ...this.warfare.troops },
+          sectors: { ...this.warfare.sectors },
+        },
         x: this.px,
         z: this.pz,
       };
@@ -2080,9 +2500,26 @@ export class ShadowVoxelEngine {
       this.inventory = { ...parsed.inventory };
       this.lora = { ...parsed.lora };
       this.quests = { ...parsed.quests };
+      if (parsed.pet && typeof parsed.pet.hunger === 'number' && typeof parsed.pet.happiness === 'number') {
+        const rawStage = typeof parsed.pet.evolutionStage === 'number' ? parsed.pet.evolutionStage : 0;
+        const evolutionStage = Math.max(0, Math.min(2, Math.round(rawStage))) as PetEvolutionStage;
+        this.pet = { ...INITIAL_PET, ...parsed.pet, evolutionStage };
+        this.rebuildPetModel(this.pet.species, this.pet.evolutionStage);
+      }
+      if (parsed.warfare && typeof parsed.warfare.castleLevel === 'number') {
+        this.warfare = {
+          ...INITIAL_WARFARE,
+          ...parsed.warfare,
+          troops: { ...INITIAL_WARFARE.troops, ...(parsed.warfare.troops || {}) },
+          sectors: { ...INITIAL_WARFARE.sectors, ...(parsed.warfare.sectors || {}) },
+        };
+        this.rebuildSiegeCohortMeshes();
+      }
       this.px = parsed.x;
       this.pz = parsed.z;
       this.py = getTerrainHeight(this.px, this.pz);
+      this.petX = this.px + 2.3;
+      this.petZ = this.pz + 1.4;
       this.inDungeon = this.pz < -185;
       this.syncCultivationAura();
       this.audio.play('levelup');
@@ -2238,6 +2675,10 @@ export class ShadowVoxelEngine {
     const spec = HERO_CLASSES[this.classKey];
     const lineage = LINEAGES[this.lineageId];
     const cult = CULTIVATION_REALMS[Math.min(CULTIVATION_REALMS.length - 1, Math.max(0, this.cultivationTier))];
+    const petMods = getPetStatusModifiers(this.pet);
+    const formationAtkBonus = this.warfare.cohortDeployed
+      ? SIEGE_FORMATIONS[this.warfare.formation].heroAtkBonusPct
+      : 0;
     const { damage, isCrit } = computePlayerDamage({
       baseDamage: baseDmg,
       level: this.level,
@@ -2247,7 +2688,7 @@ export class ShadowVoxelEngine {
       ascendantActive: this.ascendantTimer > 0,
       bioSerumActive: this.bioSerumTimer > 0,
       critChance: spec.critChance,
-      lineageAtkBonusPct: lineage.attackBonusPct,
+      lineageAtkBonusPct: lineage.attackBonusPct + petMods.atkBonusPct + formationAtkBonus,
       cultivationMult: cult.powerMultiplier,
     });
 
@@ -2313,6 +2754,8 @@ export class ShadowVoxelEngine {
   }
 
   private gainXp(amount: number): void {
+    const petMods = getPetStatusModifiers(this.pet);
+    const boostedAmount = Math.round(amount * (1 + petMods.xpBonusPct / 100));
     const { next, leveledUp } = applyXpGain(
       {
         level: this.level,
@@ -2324,7 +2767,7 @@ export class ShadowVoxelEngine {
         mp: this.mp,
         skillPoints: this.skillPoints,
       },
-      amount,
+      boostedAmount,
     );
     this.level = next.level;
     this.xp = next.xp;
@@ -2429,7 +2872,11 @@ export class ShadowVoxelEngine {
       }
     }
 
-    // 4. GeminIsland Arcade, OmniStream Cinema, or LoRAFlow Bio-Lab Quick Open
+    // 4. Voxel Realms Imperial Siege Trebuchet, GeminIsland Arcade, OmniStream Cinema, or LoRAFlow Bio-Lab Quick Open
+    if (!this.inDungeon && Math.hypot(this.px - this.trebuchetPos.x, this.pz - this.trebuchetPos.z) < 7.2) {
+      this.fireSiegeTrebuchet();
+      return;
+    }
     if (!this.inDungeon && Math.hypot(this.px - LANDMARKS.arcade.x, this.pz - LANDMARKS.arcade.z) < 9.5) {
       this.cb.onOpenModal?.('arcade');
       return;
@@ -2449,6 +2896,12 @@ export class ShadowVoxelEngine {
         this.collectGatherable(g);
         return;
       }
+    }
+
+    // 6. Pet nearby 3D Companion Follower directly in world
+    if (Math.hypot(this.px - this.petX, this.pz - this.petZ) < 4.2) {
+      this.petCompanion();
+      return;
     }
   }
 
@@ -3034,7 +3487,11 @@ export class ShadowVoxelEngine {
         const ascBoost = this.ascendantTimer > 0 ? 1.32 : 1.0;
         const dashBoost = this.dashTimer > 0 ? 2.3 : 1.0;
         const hasteBoost = 1 + this.skills.haste * 0.08;
-        const targetSpeed = spec.speed * popupSlow * ascBoost * dashBoost * hasteBoost;
+        const petSpeedBoost = 1 + getPetStatusModifiers(this.pet).speedBonusPct / 100;
+        const formationSpeedBoost =
+          1 + (this.warfare.cohortDeployed ? SIEGE_FORMATIONS[this.warfare.formation].heroSpeedBonusPct : 0) / 100;
+        const targetSpeed =
+          spec.speed * popupSlow * ascBoost * dashBoost * hasteBoost * petSpeedBoost * formationSpeedBoost;
 
         this.pvx = THREE.MathUtils.damp(this.pvx, wx * targetSpeed, 14, dt);
         this.pvz = THREE.MathUtils.damp(this.pvz, wz * targetSpeed, 14, dt);
@@ -3157,7 +3614,10 @@ export class ShadowVoxelEngine {
         (e) => e.alive && e.kind === 'knight' && Math.hypot(e.x - c.x, e.z - c.z) < 15,
       ).length;
 
-      const next = advanceCastleCapture(c.progress, c.owner, dt, playerInside, knightsInside);
+      const captureMult = this.warfare.cohortDeployed
+        ? SIEGE_FORMATIONS[this.warfare.formation].captureMult
+        : 1.0;
+      const next = advanceCastleCapture(c.progress, c.owner, dt * captureMult, playerInside, knightsInside);
       c.progress = next.progress;
       if (next.flippedToBlue) {
         c.owner = 'blue';
@@ -3367,7 +3827,13 @@ export class ShadowVoxelEngine {
 
   private damagePlayer(rawAmount: number, labelPrefix?: string): void {
     if (this.phase !== 'playing' || this.dashTimer > 0) return; // Dodge-roll i-frames!
-    const dmg = Math.max(1, Math.round(rawAmount * (this.adShieldTimer > 0 ? 0.45 : 1.0)));
+    const formationDmgMult = this.warfare.cohortDeployed
+      ? 1 - SIEGE_FORMATIONS[this.warfare.formation].heroDmgReductionPct / 100
+      : 1.0;
+    const dmg = Math.max(
+      1,
+      Math.round(rawAmount * (this.adShieldTimer > 0 ? 0.45 : 1.0) * formationDmgMult),
+    );
     this.hp = Math.max(0, this.hp - dmg);
     this.trauma = Math.min(1, this.trauma + 0.25);
     this.audio.play('hit');
@@ -3427,6 +3893,96 @@ export class ShadowVoxelEngine {
       }
     }
 
+    // 2b. 3D Pet Follower (Kibo) follows player smoothly, animates trot/tail-wag/jump/evolution aura, and updates Hunger & Happiness
+    this.pet = tickPetState(this.pet, dt);
+    const petMods = getPetStatusModifiers(this.pet);
+    if (petMods.auraActive && this.hp < this.maxHp) {
+      this.hp = Math.min(this.maxHp, this.hp + petMods.hpRegenPerSec * dt);
+    }
+    const petTargetX = this.px - Math.sin(this.pRotY) * 2.5 + Math.cos(this.pRotY) * 2.1;
+    const petTargetZ = this.pz - Math.cos(this.pRotY) * 2.5 - Math.sin(this.pRotY) * 2.1;
+    const pdx = petTargetX - this.petX;
+    const pdz = petTargetZ - this.petZ;
+    const pdist = Math.hypot(pdx, pdz);
+
+    if (pdist > 26) {
+      // Snap near hero after long teleports or dungeon portal transitions
+      this.petX = petTargetX;
+      this.petZ = petTargetZ;
+      this.spawnParticles(this.petX, getTerrainHeight(this.petX, this.petZ) + 1.0, this.petZ, 0x38bdf8, 10, 6);
+    } else if (pdist > 0.72) {
+      const petSpeed = Math.min(24, 7.6 + pdist * 1.35);
+      this.petX += (pdx / pdist) * petSpeed * dt;
+      this.petZ += (pdz / pdist) * petSpeed * dt;
+      const desiredPetYaw = Math.atan2(pdx, pdz);
+      let yawDiff = desiredPetYaw - this.petRotY;
+      while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
+      while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
+      this.petRotY += yawDiff * Math.min(1, dt * 10);
+      this.petWalkPhase += petSpeed * dt * 1.45;
+    } else {
+      const toHeroYaw = Math.atan2(this.px - this.petX, this.pz - this.petZ);
+      let yawDiff = toHeroYaw - this.petRotY;
+      while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
+      while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
+      this.petRotY += yawDiff * Math.min(1, dt * 3.5);
+    }
+
+    this.petJumpTimer = Math.max(0, this.petJumpTimer - dt);
+    const jumpPhase = Math.min(1, this.petJumpTimer / 0.65);
+    const jumpArc = this.petJumpTimer > 0 ? Math.max(0, Math.sin(jumpPhase * Math.PI)) * 1.1 : 0;
+    const isMoving = pdist > 0.72;
+    const slimeBounce =
+      this.pet.species === 'emerald_slime'
+        ? Math.abs(Math.sin(t * (isMoving ? 8.5 : 3.4))) * (isMoving ? 0.45 : 0.14)
+        : isMoving
+          ? Math.abs(Math.sin(this.petWalkPhase)) * 0.12
+          : 0;
+    const groundY = this.inDungeon
+      ? DUNGEON_CENTER.y
+      : Math.max(WATER_LEVEL + 0.04, getTerrainHeight(this.petX, this.petZ));
+
+    this.petRig.group.position.set(this.petX, groundY, this.petZ);
+    this.petRig.group.rotation.y = this.petRotY;
+    this.petRig.body.position.y = jumpArc + slimeBounce;
+
+    // Animated legs, joyful tail wag proportional to happiness, and subtle head look
+    if (this.petRig.legs.length === 4) {
+      const stride = isMoving ? Math.sin(this.petWalkPhase) * 0.68 : 0;
+      this.petRig.legs[0].rotation.x = stride;
+      this.petRig.legs[1].rotation.x = -stride;
+      this.petRig.legs[2].rotation.x = -stride;
+      this.petRig.legs[3].rotation.x = stride;
+    } else {
+      const stretch = 1 + slimeBounce * 0.32;
+      this.petRig.body.scale.set(1 / Math.sqrt(stretch), stretch, 1 / Math.sqrt(stretch));
+    }
+    const wagSpeed = 4.0 + (this.pet.happiness / 100) * 9.5;
+    const wagAmp = 0.22 + (this.pet.happiness / 100) * 0.42;
+    this.petRig.tail.rotation.y = Math.sin(t * wagSpeed) * wagAmp;
+    this.petRig.head.rotation.z = Math.sin(t * 2.1) * 0.08;
+
+    // Animate Stage 1 (Radiant) & Stage 2 (Ascendant) 3D evolution attachments
+    if (this.petRig.halo) {
+      this.petRig.halo.rotation.y = t * 1.4;
+      this.petRig.halo.position.y =
+        (this.pet.species === 'emerald_slime' ? 1.48 : 1.62) + Math.sin(t * 3.2) * 0.07;
+    }
+    if (this.petRig.auraRing) {
+      this.petRig.auraRing.rotation.z = t * 0.85;
+      const pulse = 1 + Math.sin(t * 3.4) * 0.07;
+      this.petRig.auraRing.scale.setScalar(pulse);
+    }
+    if (this.petRig.wings) {
+      const flap = Math.sin(t * (isMoving ? 10 : 4.8)) * 0.26;
+      this.petRig.wings[0].rotation.z = flap;
+      this.petRig.wings[1].rotation.z = -flap;
+    }
+    if (this.petRig.orbitCrystals) {
+      this.petRig.orbitCrystals.rotation.y = -t * 2.1;
+      this.petRig.orbitCrystals.position.y = 0.88 + Math.sin(t * 2.6) * 0.1;
+    }
+
     // 3. Allied Dawn Patrols wandering overworld
     for (const a of this.allyAdventurers) {
       a.rig.group.visible = !this.inDungeon;
@@ -3448,6 +4004,142 @@ export class ShadowVoxelEngine {
         const sw = Math.sin(t * 9) * 0.45;
         a.rig.leftLeg.rotation.x = sw;
         a.rig.rightLeg.rotation.x = -sw;
+      }
+    }
+
+    // 4. Voxel Realms Imperial Siege Trebuchet reload/swing, flaming boulder arcs & 3D Siege Cohort formation AI
+    if (this.warfare.trebuchetCooldownSec > 0) {
+      this.warfare.trebuchetCooldownSec = Math.max(0, this.warfare.trebuchetCooldownSec - dt);
+      if (this.warfare.trebuchetCooldownSec === 0 && this.trebuchet) {
+        this.trebuchet.boulderMesh.visible = true;
+      }
+    }
+    if (this.trebuchet) {
+      this.trebuchet.group.visible = !this.inDungeon;
+      if (this.trebuchetAnimTimer > 0) {
+        this.trebuchetAnimTimer = Math.max(0, this.trebuchetAnimTimer - dt);
+        const swingP = 1 - this.trebuchetAnimTimer / 0.65;
+        this.trebuchet.armPivot.rotation.x = 0.52 - Math.sin(swingP * Math.PI) * 1.48;
+      } else {
+        this.trebuchet.armPivot.rotation.x = THREE.MathUtils.damp(this.trebuchet.armPivot.rotation.x, 0.52, 5, dt);
+      }
+    }
+
+    for (let i = this.siegeBoulders.length - 1; i >= 0; i--) {
+      const b = this.siegeBoulders[i];
+      b.t += dt / b.duration;
+      const p = Math.min(1, b.t);
+      const bx = THREE.MathUtils.lerp(b.startX, b.targetX, p);
+      const bz = THREE.MathUtils.lerp(b.startZ, b.targetZ, p);
+      const by = THREE.MathUtils.lerp(b.startY, b.targetY, p) + Math.sin(p * Math.PI) * 22;
+      b.mesh.position.set(bx, by, bz);
+      b.mesh.rotation.x += dt * 7;
+      b.mesh.rotation.z += dt * 5;
+      if (p >= 1) {
+        this.scene.remove(b.mesh);
+        (b.mesh.material as THREE.Material).dispose();
+        this.siegeBoulders.splice(i, 1);
+        this.spawnParticles(b.targetX, b.targetY + 1.2, b.targetZ, 0xf97316, 30, 15);
+        this.spawnParticles(b.targetX, b.targetY + 1.6, b.targetZ, 0xfef08a, 18, 12);
+        this.audio.play('crit');
+        const commanderBonus = this.warfare.commanderId === 'aiden' ? 1.35 : 1.0;
+        const dmg = Math.round((45 + this.warfare.castleLevel * 12) * commanderBonus);
+        for (const e of this.enemies) {
+          if (e.alive && !e.inDungeon && Math.hypot(e.x - b.targetX, e.z - b.targetZ) < 18) {
+            this.damageEnemy(e, dmg, true);
+          }
+        }
+        const redCastle = this.castles.find((c) => c.id === 'red');
+        if (redCastle && redCastle.owner !== 'blue') {
+          redCastle.progress = Math.min(99, redCastle.progress + Math.round(18 * commanderBonus));
+        }
+        this.pushFloatLabel(b.targetX, b.targetY + 3.5, b.targetZ, `TREBUCHET HIT -${dmg}!`, '#fb923c');
+      }
+    }
+
+    const fwdX = Math.sin(this.pRotY);
+    const fwdZ = Math.cos(this.pRotY);
+    const rightX = Math.cos(this.pRotY);
+    const rightZ = -Math.sin(this.pRotY);
+
+    for (const unit of this.siegeCohort) {
+      unit.rig.group.visible = this.warfare.cohortDeployed && !this.inDungeon;
+      if (!unit.rig.group.visible) continue;
+
+      const idx = unit.slotIdx;
+      let localRight = 0;
+      let localFwd = -4.2;
+      if (this.warfare.formation === 'SHIELD_WALL') {
+        localRight = (idx - (this.siegeCohort.length - 1) / 2) * 2.1;
+        localFwd = 3.2;
+      } else if (this.warfare.formation === 'WEDGE_CHARGE') {
+        const rank = Math.floor(idx / 2) + 1;
+        const side = idx % 2 === 0 ? -1 : 1;
+        localRight = side * rank * 1.9;
+        localFwd = 4.8 - rank * 1.6;
+      } else if (this.warfare.formation === 'LOOSE_SKIRMISH') {
+        const ang = (idx / Math.max(1, this.siegeCohort.length)) * Math.PI * 2 + t * 0.2;
+        localRight = Math.cos(ang) * 5.2;
+        localFwd = Math.sin(ang) * 4.6;
+      } else {
+        // PHALANX_ADVANCE: tight disciplined double rank behind hero
+        const row = Math.floor(idx / 3);
+        const col = (idx % 3) - 1;
+        localRight = col * 2.0;
+        localFwd = -3.4 - row * 2.2;
+      }
+
+      const targetX = this.px + rightX * localRight + fwdX * localFwd;
+      const targetZ = this.pz + rightZ * localRight + fwdZ * localFwd;
+      const dx = targetX - unit.x;
+      const dz = targetZ - unit.z;
+      const dist = Math.hypot(dx, dz);
+
+      if (dist > 28) {
+        unit.x = targetX;
+        unit.z = targetZ;
+      } else if (dist > 0.7) {
+        const spd = Math.min(20, 7.5 + dist * 1.2);
+        unit.x += (dx / dist) * spd * dt;
+        unit.z += (dz / dist) * spd * dt;
+        unit.rotY = Math.atan2(dx, dz);
+        const swing = Math.sin(t * 10 + idx) * 0.55;
+        unit.rig.leftLeg.rotation.x = swing;
+        unit.rig.rightLeg.rotation.x = -swing;
+      } else {
+        unit.rig.leftLeg.rotation.x = 0;
+        unit.rig.rightLeg.rotation.x = 0;
+        unit.rotY = this.pRotY;
+      }
+
+      const gy = Math.max(WATER_LEVEL + 0.08, getTerrainHeight(unit.x, unit.z));
+      unit.rig.group.position.set(unit.x, gy, unit.z);
+      unit.rig.group.rotation.y = unit.rotY;
+
+      // Active Siege Cohort combat engagement against nearby enemies
+      unit.atkCd = Math.max(0, unit.atkCd - dt);
+      if (unit.atkCd <= 0) {
+        const range = unit.branch === 'shooter' ? 16 : unit.branch === 'bomber' ? 13 : 8;
+        let nearest: EnemyEntity | null = null;
+        let bestD = range;
+        for (const e of this.enemies) {
+          if (!e.alive || e.inDungeon) continue;
+          const ed = Math.hypot(e.x - unit.x, e.z - unit.z);
+          if (ed < bestD) {
+            bestD = ed;
+            nearest = e;
+          }
+        }
+        if (nearest) {
+          unit.atkCd = unit.branch === 'shooter' ? 1.5 : unit.branch === 'bomber' ? 2.1 : 1.7;
+          unit.rig.rightArm.rotation.x = -1.1;
+          const branchMult = WAR_COMMANDERS[this.warfare.commanderId].specialty === unit.branch ? 1.35 : 1.0;
+          const hitDmg = Math.round((unit.branch === 'bomber' ? 18 : unit.branch === 'shooter' ? 13 : 11) * branchMult);
+          this.damageEnemy(nearest, hitDmg, unit.branch === 'bomber');
+          this.spawnParticles(nearest.x, nearest.y + 1.2, nearest.z, unit.branch === 'bomber' ? 0xfb923c : 0x38bdf8, 8, 7);
+        }
+      } else {
+        unit.rig.rightArm.rotation.x = THREE.MathUtils.damp(unit.rig.rightArm.rotation.x, 0, 8, dt);
       }
     }
   }
@@ -3692,6 +4384,11 @@ export class ShadowVoxelEngine {
     for (const v of this.islandVillagers) {
       if (!this.inDungeon && Math.hypot(this.px - v.x, this.pz - v.z) < 4.8) return `[E] Chat with ${v.name}`;
     }
+    if (!this.inDungeon && Math.hypot(this.px - this.trebuchetPos.x, this.pz - this.trebuchetPos.z) < 7.2) {
+      return this.warfare.trebuchetCooldownSec > 0.2
+        ? `Imperial Trebuchet reloading (${Math.ceil(this.warfare.trebuchetCooldownSec)}s)...`
+        : '[E] Fire Imperial Siege Trebuchet at Obsidian Citadel';
+    }
     if (!this.inDungeon && Math.hypot(this.px - LANDMARKS.arcade.x, this.pz - LANDMARKS.arcade.z) < 9.5) {
       return '[E] Play GeminIsland Arcade (Tic-Tac-Toe / Simon / Lights Out)';
     }
@@ -3822,6 +4519,17 @@ export class ShadowVoxelEngine {
       elapsedSec: Math.floor(this.elapsedSec),
       pitchSemitones: this.audio.getPitchSemitones(),
       cinemaChannel: this.cinemaChannel,
+      pet: {
+        ...this.pet,
+        hunger: Math.round(this.pet.hunger),
+        happiness: Math.round(this.pet.happiness),
+      },
+      warfare: {
+        ...this.warfare,
+        troops: { ...this.warfare.troops },
+        sectors: { ...this.warfare.sectors },
+        trebuchetCooldownSec: Math.ceil(this.warfare.trebuchetCooldownSec),
+      },
     });
   }
 

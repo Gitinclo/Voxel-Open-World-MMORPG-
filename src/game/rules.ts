@@ -1,4 +1,5 @@
 import type {
+  CastleWarfareState,
   CultivationRealmSpec,
   HeroClassKey,
   HeroClassSpec,
@@ -6,10 +7,20 @@ import type {
   LineageId,
   LineageSpec,
   LoraWeights,
+  PetEvolutionStage,
+  PetMood,
+  PetSpeciesKey,
+  PetState,
+  PetStatusModifiers,
   QuestProgress,
   RealmShardSpec,
   SavePayload,
+  SectorOwner,
+  SiegeFormationType,
   SkillLevels,
+  TerritorySectorCode,
+  TroopBranch,
+  WarCommanderId,
 } from './types';
 
 export const HERO_CLASSES: Record<HeroClassKey, HeroClassSpec> = {
@@ -578,8 +589,21 @@ export function resolveOfflineLeoReply(
         'Head south to the Ashen Sea dock and press [F] to fish, or gather glowing Crystals/Sticks/Stones with [E] and open the Forge with [C].',
     };
   }
+  if (
+    q.includes('pet') ||
+    q.includes('hunger') ||
+    q.includes('happy') ||
+    q.includes('kibo') ||
+    q.includes('feed') ||
+    q.includes('evolv')
+  ) {
+    return {
+      reply:
+        'Your 3D Pet Follower trots right behind your shoulder! Reach 90% Hunger & 92% Happiness to evolve into Radiant Form (+1.8 HP/s, +12% ATK, +15% XP, +8% Speed), and 98% Hunger, 98% Happiness & Bond Lv 2 for Ascendant Form!',
+    };
+  }
   return {
-    reply: `L.E.O. online. You are Level ${context.level} in ${context.biome} (${Math.round(context.hp)}/${context.maxHp} HP, ${context.questsCompleted}/7 quests done). Ask me about Malakor, Dungeon, Castle, Buggy, Cinema, Bio-Lab, Ad-Shield, or Bookstore.`,
+    reply: `L.E.O. online. You are Level ${context.level} in ${context.biome} (${Math.round(context.hp)}/${context.maxHp} HP, ${context.questsCompleted}/7 quests done). Ask me about Pet, Malakor, Dungeon, Castle, Buggy, Cinema, Bio-Lab, Ad-Shield, or Bookstore.`,
   };
 }
 
@@ -694,4 +718,555 @@ export function createLightsOutPuzzle(seed = 1): boolean[] {
   }
   return grid;
 }
+
+// =========================================================================
+// 3D PET FOLLOWER STATE RULES (Hunger, Happiness, Mood & Bond Progression)
+// =========================================================================
+
+export const PET_SPECIES_SPECS: Record<
+  PetSpeciesKey,
+  { label: string; title: string; stageTitles: readonly [string, string, string]; primaryHex: number; accentHex: number }
+> = {
+  voxel_fox: {
+    label: 'Voxel Fox',
+    title: 'Sunlit Kitsune',
+    stageTitles: ['Voxel Fox', 'Sunlit Kitsune', 'Celestial Nine-Tail'] as const,
+    primaryHex: 0xf97316,
+    accentHex: 0xfef3c7,
+  },
+  emerald_slime: {
+    label: 'Emerald Slime',
+    title: 'Lagoon Sprout',
+    stageTitles: ['Emerald Slime', 'Crystal Sovereign', 'Infinity Prism King'] as const,
+    primaryHex: 0x10b981,
+    accentHex: 0x6ee7b7,
+  },
+  void_pup: {
+    label: 'Void Pup',
+    title: 'Astral Hound',
+    stageTitles: ['Void Pup', 'Astral Direhound', 'Cosmic Rift Fenrir'] as const,
+    primaryHex: 0x4338ca,
+    accentHex: 0x38bdf8,
+  },
+};
+
+export interface PetEvolutionSpec {
+  stage: PetEvolutionStage;
+  tierName: 'Companion' | 'Radiant' | 'Ascendant';
+  minHunger: number;
+  minHappiness: number;
+  minBondLevel: number;
+  scale: number;
+  hpRegenPerSec: number;
+  atkBonusPct: number;
+  xpBonusPct: number;
+  speedBonusPct: number;
+  auraLabel: string;
+}
+
+export const PET_EVOLUTION_STAGES: ReadonlyArray<PetEvolutionSpec> = [
+  {
+    stage: 0,
+    tierName: 'Companion',
+    minHunger: 0,
+    minHappiness: 0,
+    minBondLevel: 1,
+    scale: 1.15,
+    hpRegenPerSec: 0.6,
+    atkBonusPct: 0,
+    xpBonusPct: 5,
+    speedBonusPct: 0,
+    auraLabel: 'Warmth Aura',
+  },
+  {
+    stage: 1,
+    tierName: 'Radiant',
+    minHunger: 90,
+    minHappiness: 92,
+    minBondLevel: 1,
+    scale: 1.32,
+    hpRegenPerSec: 1.8,
+    atkBonusPct: 12,
+    xpBonusPct: 15,
+    speedBonusPct: 8,
+    auraLabel: 'Radiant Bond Aura',
+  },
+  {
+    stage: 2,
+    tierName: 'Ascendant',
+    minHunger: 98,
+    minHappiness: 98,
+    minBondLevel: 2,
+    scale: 1.48,
+    hpRegenPerSec: 3.2,
+    atkBonusPct: 25,
+    xpBonusPct: 30,
+    speedBonusPct: 15,
+    auraLabel: 'Celestial Ascendant Aura',
+  },
+];
+
+export function computePetEvolutionStage(
+  currentStage: PetEvolutionStage,
+  hunger: number,
+  happiness: number,
+  bondLevel: number,
+): PetEvolutionStage {
+  let nextStage: PetEvolutionStage = currentStage;
+  const stage1 = PET_EVOLUTION_STAGES[1];
+  const stage2 = PET_EVOLUTION_STAGES[2];
+  if (
+    nextStage < 1 &&
+    hunger >= stage1.minHunger &&
+    happiness >= stage1.minHappiness &&
+    bondLevel >= stage1.minBondLevel
+  ) {
+    nextStage = 1;
+  }
+  if (
+    nextStage < 2 &&
+    hunger >= stage2.minHunger &&
+    happiness >= stage2.minHappiness &&
+    bondLevel >= stage2.minBondLevel
+  ) {
+    nextStage = 2;
+  }
+  return nextStage;
+}
+
+export function getPetFormTitle(species: PetSpeciesKey, evolutionStage: PetEvolutionStage): string {
+  return PET_SPECIES_SPECS[species].stageTitles[evolutionStage] ?? PET_SPECIES_SPECS[species].label;
+}
+
+export function getPetStatusModifiers(pet: PetState): PetStatusModifiers {
+  const spec = PET_EVOLUTION_STAGES[pet.evolutionStage] ?? PET_EVOLUTION_STAGES[0];
+  const auraActive = pet.hunger >= 35 && pet.happiness >= 50;
+  if (!auraActive) {
+    return {
+      auraActive: false,
+      hpRegenPerSec: 0,
+      atkBonusPct: 0,
+      xpBonusPct: 0,
+      speedBonusPct: 0,
+      auraLabel: `${spec.auraLabel} (Dormant — feed or pet to reactivate)`,
+    };
+  }
+  return {
+    auraActive: true,
+    hpRegenPerSec: spec.hpRegenPerSec,
+    atkBonusPct: spec.atkBonusPct,
+    xpBonusPct: spec.xpBonusPct,
+    speedBonusPct: spec.speedBonusPct,
+    auraLabel: spec.auraLabel,
+  };
+}
+
+export function getPetMood(hunger: number, happiness: number): PetMood {
+  if (hunger < 25) return 'Hungry';
+  if (happiness < 30) return 'Lonely';
+  if (hunger >= 80 && happiness >= 85) return 'Ecstatic';
+  if (happiness >= 60) return 'Joyful';
+  return 'Content';
+}
+
+export const INITIAL_PET: PetState = {
+  name: 'Kibo',
+  species: 'voxel_fox',
+  hunger: 82,
+  happiness: 86,
+  mood: getPetMood(82, 86),
+  level: 1,
+  bondXp: 0,
+  evolutionStage: 0,
+};
+
+function applyPetBondXp(level: number, bondXp: number, gain: number): { level: number; bondXp: number } {
+  let nextLevel = level;
+  let nextXp = bondXp + Math.max(0, Math.round(gain));
+  while (nextXp >= 100) {
+    nextXp -= 100;
+    nextLevel += 1;
+  }
+  return { level: nextLevel, bondXp: nextXp };
+}
+
+export function tickPetState(pet: PetState, dtSec: number): PetState {
+  const safeDt = Math.max(0, dtSec);
+  const nextHunger = Math.max(0, Math.min(100, pet.hunger - safeDt * 0.32));
+  const happyDecay = nextHunger < 30 ? 0.48 : 0.16;
+  const nextHappiness = Math.max(0, Math.min(100, pet.happiness - safeDt * happyDecay));
+  return {
+    ...pet,
+    hunger: nextHunger,
+    happiness: nextHappiness,
+    mood: getPetMood(nextHunger, nextHappiness),
+  };
+}
+
+export function feedPetState(pet: PetState, food: 'apple' | 'fish' | 'treat'): PetState {
+  const hungerGain = food === 'fish' ? 34 : food === 'apple' ? 26 : 16;
+  const happyGain = food === 'fish' ? 16 : food === 'apple' ? 12 : 8;
+  const xpGain = food === 'fish' ? 28 : food === 'apple' ? 22 : 12;
+
+  const hunger = Math.max(0, Math.min(100, pet.hunger + hungerGain));
+  const happiness = Math.max(0, Math.min(100, pet.happiness + happyGain));
+  const bond = applyPetBondXp(pet.level, pet.bondXp, xpGain);
+  const evolutionStage = computePetEvolutionStage(pet.evolutionStage, hunger, happiness, bond.level);
+  return {
+    ...pet,
+    hunger,
+    happiness,
+    mood: getPetMood(hunger, happiness),
+    level: bond.level,
+    bondXp: bond.bondXp,
+    evolutionStage,
+  };
+}
+
+export function petCompanionState(pet: PetState): PetState {
+  const happiness = Math.max(0, Math.min(100, pet.happiness + 18));
+  const bond = applyPetBondXp(pet.level, pet.bondXp, 15);
+  const evolutionStage = computePetEvolutionStage(pet.evolutionStage, pet.hunger, happiness, bond.level);
+  return {
+    ...pet,
+    happiness,
+    mood: getPetMood(pet.hunger, happiness),
+    level: bond.level,
+    bondXp: bond.bondXp,
+    evolutionStage,
+  };
+}
+
+// =========================================================================
+// VOXEL REALMS RPG: IMPERIAL CASTLE WARFARE & 9-SECTOR SIEGE RULES (Repo #4)
+// =========================================================================
+
+export const MAX_IMPERIAL_CASTLE_LEVEL = 10;
+
+export const ALL_TERRITORY_SECTORS: readonly TerritorySectorCode[] = [
+  'A1',
+  'A2',
+  'A3',
+  'B1',
+  'B2',
+  'B3',
+  'C1',
+  'C2',
+  'C3',
+] as const;
+
+export const TROOP_SPECS: Record<
+  TroopBranch,
+  { label: string; role: string; costGold: number; power: number; accent: string }
+> = {
+  shieldbearer: {
+    label: 'Shieldbearers',
+    role: 'Frontline Aegis Tank',
+    costGold: 10,
+    power: 18,
+    accent: '#38bdf8',
+  },
+  shooter: {
+    label: 'Shooters',
+    role: 'Ranged Volley Corps',
+    costGold: 14,
+    power: 25,
+    accent: '#34d399',
+  },
+  bomber: {
+    label: 'Bombers',
+    role: 'Siege Gate Breachers',
+    costGold: 20,
+    power: 38,
+    accent: '#fb923c',
+  },
+};
+
+export const SIEGE_FORMATIONS: Record<
+  SiegeFormationType,
+  {
+    label: string;
+    shortDesc: string;
+    powerMult: number;
+    heroAtkBonusPct: number;
+    heroDmgReductionPct: number;
+    heroSpeedBonusPct: number;
+    captureMult: number;
+  }
+> = {
+  SHIELD_WALL: {
+    label: 'Shield Wall',
+    shortDesc: '+35% Cohort Defense · -18% Hero Damage Taken',
+    powerMult: 1.08,
+    heroAtkBonusPct: 4,
+    heroDmgReductionPct: 18,
+    heroSpeedBonusPct: 0,
+    captureMult: 1.1,
+  },
+  WEDGE_CHARGE: {
+    label: 'Wedge Charge',
+    shortDesc: '+25% Army Power · +16% Hero Attack Power',
+    powerMult: 1.25,
+    heroAtkBonusPct: 16,
+    heroDmgReductionPct: 0,
+    heroSpeedBonusPct: 4,
+    captureMult: 1.15,
+  },
+  LOOSE_SKIRMISH: {
+    label: 'Loose Skirmish',
+    shortDesc: '+15% Army Power · +12% Hero Move Speed',
+    powerMult: 1.15,
+    heroAtkBonusPct: 8,
+    heroDmgReductionPct: 8,
+    heroSpeedBonusPct: 12,
+    captureMult: 1.05,
+  },
+  PHALANX_ADVANCE: {
+    label: 'Phalanx Advance',
+    shortDesc: '+45% Castle Capture Speed · +18% Army Power',
+    powerMult: 1.18,
+    heroAtkBonusPct: 10,
+    heroDmgReductionPct: 10,
+    heroSpeedBonusPct: 0,
+    captureMult: 1.45,
+  },
+};
+
+export const WAR_COMMANDERS: Record<
+  WarCommanderId,
+  {
+    name: string;
+    title: string;
+    specialty: TroopBranch;
+    skillName: string;
+    bonusDesc: string;
+    specialtyBonusMult: number;
+  }
+> = {
+  arthur: {
+    name: 'Arthur Pendragon',
+    title: 'Aegis of the Realm',
+    specialty: 'shieldbearer',
+    skillName: 'Fortress of the Gods',
+    bonusDesc: '+35% Shieldbearer power & fortress vanguard aura',
+    specialtyBonusMult: 1.35,
+  },
+  lyra: {
+    name: 'Lyra Shadowshot',
+    title: 'Windrunner Huntress',
+    specialty: 'shooter',
+    skillName: 'Gale Volley',
+    bonusDesc: '+35% Shooter volley power & rapid suppression',
+    specialtyBonusMult: 1.35,
+  },
+  aiden: {
+    name: 'Aiden Skyrender',
+    title: 'Vanguard Commander',
+    specialty: 'bomber',
+    skillName: 'Sovereign Breach',
+    bonusDesc: '+35% Bomber siege power & trebuchet blast boost',
+    specialtyBonusMult: 1.35,
+  },
+};
+
+export const INITIAL_WARFARE: CastleWarfareState = {
+  castleLevel: 1,
+  troops: {
+    shieldbearer: 6,
+    shooter: 4,
+    bomber: 2,
+  },
+  formation: 'SHIELD_WALL',
+  commanderId: 'arthur',
+  sectors: {
+    A1: 'DAWN',
+    A2: 'DAWN',
+    A3: 'CONTESTED',
+    B1: 'DAWN',
+    B2: 'CONTESTED',
+    B3: 'OBSIDIAN',
+    C1: 'CONTESTED',
+    C2: 'OBSIDIAN',
+    C3: 'OBSIDIAN',
+  },
+  cohortDeployed: true,
+  trebuchetCooldownSec: 0,
+  ralliesWon: 0,
+};
+
+export function getImperialCastleEra(level: number): string {
+  if (level >= 9) return 'Sovereign Imperial Keep';
+  if (level >= 7) return 'Aether Citadel';
+  if (level >= 5) return 'Obsidian Fortress';
+  if (level >= 3) return 'Stone Bastion';
+  return 'Timber Keep';
+}
+
+export function getImperialCastleSpec(level: number): {
+  level: number;
+  era: string;
+  maxTroops: number;
+  upgradeGold: number;
+  upgradeStones: number;
+  castlePowerBonus: number;
+} {
+  const safeLv = Math.max(1, Math.min(MAX_IMPERIAL_CASTLE_LEVEL, Math.floor(level)));
+  return {
+    level: safeLv,
+    era: getImperialCastleEra(safeLv),
+    maxTroops: 24 + (safeLv - 1) * 18,
+    upgradeGold: 40 + safeLv * 35,
+    upgradeStones: 15 + safeLv * 12,
+    castlePowerBonus: safeLv * 180,
+  };
+}
+
+export function getTotalTroopCount(troops: Record<TroopBranch, number>): number {
+  return Math.max(0, troops.shieldbearer) + Math.max(0, troops.shooter) + Math.max(0, troops.bomber);
+}
+
+export function computeWarfarePower(warfare: CastleWarfareState): number {
+  const castleSpec = getImperialCastleSpec(warfare.castleLevel);
+  const commander = WAR_COMMANDERS[warfare.commanderId] ?? WAR_COMMANDERS.arthur;
+  const formation = SIEGE_FORMATIONS[warfare.formation] ?? SIEGE_FORMATIONS.SHIELD_WALL;
+
+  let troopPower = 0;
+  for (const branch of ['shieldbearer', 'shooter', 'bomber'] as const) {
+    const base = Math.max(0, warfare.troops[branch]) * TROOP_SPECS[branch].power;
+    const mult = commander.specialty === branch ? commander.specialtyBonusMult : 1;
+    troopPower += base * mult;
+  }
+  const dawnSectors = ALL_TERRITORY_SECTORS.filter((s) => warfare.sectors[s] === 'DAWN').length;
+  return Math.round((castleSpec.castlePowerBonus + troopPower) * formation.powerMult + dawnSectors * 95);
+}
+
+export function attemptImperialCastleUpgrade(
+  warfare: CastleWarfareState,
+  gold: number,
+  spiritStones: number,
+): { ok: boolean; reason?: string; warfare: CastleWarfareState; gold: number; spiritStones: number } {
+  if (warfare.castleLevel >= MAX_IMPERIAL_CASTLE_LEVEL) {
+    return { ok: false, reason: 'Imperial Castle is already at max Level 10.', warfare, gold, spiritStones };
+  }
+  const spec = getImperialCastleSpec(warfare.castleLevel);
+  if (gold < spec.upgradeGold || spiritStones < spec.upgradeStones) {
+    return {
+      ok: false,
+      reason: `Need ${spec.upgradeGold} Gold & ${spec.upgradeStones} Spirit Stones to upgrade to Castle Lv ${warfare.castleLevel + 1}.`,
+      warfare,
+      gold,
+      spiritStones,
+    };
+  }
+  const nextWarfare: CastleWarfareState = {
+    ...warfare,
+    castleLevel: warfare.castleLevel + 1,
+    troops: { ...warfare.troops },
+    sectors: { ...warfare.sectors },
+  };
+  return {
+    ok: true,
+    warfare: nextWarfare,
+    gold: gold - spec.upgradeGold,
+    spiritStones: spiritStones - spec.upgradeStones,
+  };
+}
+
+export function attemptTrainSiegeTroops(
+  warfare: CastleWarfareState,
+  branch: TroopBranch,
+  count: number,
+  gold: number,
+): { ok: boolean; reason?: string; warfare: CastleWarfareState; gold: number } {
+  const safeCount = Math.max(1, Math.floor(count));
+  const spec = getImperialCastleSpec(warfare.castleLevel);
+  const currentTotal = getTotalTroopCount(warfare.troops);
+  if (currentTotal + safeCount > spec.maxTroops) {
+    return {
+      ok: false,
+      reason: `Barracks capacity full (${currentTotal}/${spec.maxTroops}). Upgrade Imperial Castle for more slots.`,
+      warfare,
+      gold,
+    };
+  }
+  const totalCost = TROOP_SPECS[branch].costGold * safeCount;
+  if (gold < totalCost) {
+    return {
+      ok: false,
+      reason: `Need ${totalCost} Gold to train ${safeCount} ${TROOP_SPECS[branch].label}.`,
+      warfare,
+      gold,
+    };
+  }
+  return {
+    ok: true,
+    warfare: {
+      ...warfare,
+      troops: {
+        ...warfare.troops,
+        [branch]: warfare.troops[branch] + safeCount,
+      },
+      sectors: { ...warfare.sectors },
+    },
+    gold: gold - totalCost,
+  };
+}
+
+export function resolveTerritoryRally(
+  warfare: CastleWarfareState,
+  sector: TerritorySectorCode,
+): {
+  ok: boolean;
+  reason?: string;
+  warfare: CastleWarfareState;
+  goldReward: number;
+  xpReward: number;
+  obsidianSiegeDelta: number;
+  newOwner: SectorOwner;
+} {
+  const currentOwner = warfare.sectors[sector];
+  if (currentOwner === 'DAWN') {
+    return {
+      ok: false,
+      reason: `Sector ${sector} is already under Dawn Imperial control.`,
+      warfare,
+      goldReward: 0,
+      xpReward: 0,
+      obsidianSiegeDelta: 0,
+      newOwner: currentOwner,
+    };
+  }
+  const armyPower = computeWarfarePower(warfare);
+  const requiredPower = currentOwner === 'OBSIDIAN' ? 520 : 320;
+  if (armyPower < requiredPower) {
+    return {
+      ok: false,
+      reason: `Need ${requiredPower} Army Power to rally Sector ${sector} (current: ${armyPower}). Train troops or switch to Wedge Charge!`,
+      warfare,
+      goldReward: 0,
+      xpReward: 0,
+      obsidianSiegeDelta: 0,
+      newOwner: currentOwner,
+    };
+  }
+  const newOwner: SectorOwner = currentOwner === 'OBSIDIAN' && armyPower < 900 ? 'CONTESTED' : 'DAWN';
+  const nextSectors: Record<TerritorySectorCode, SectorOwner> = {
+    ...warfare.sectors,
+    [sector]: newOwner,
+  };
+  return {
+    ok: true,
+    warfare: {
+      ...warfare,
+      troops: { ...warfare.troops },
+      sectors: nextSectors,
+      ralliesWon: warfare.ralliesWon + 1,
+    },
+    goldReward: newOwner === 'DAWN' ? 55 : 28,
+    xpReward: newOwner === 'DAWN' ? 65 : 35,
+    obsidianSiegeDelta: newOwner === 'DAWN' ? 16 : 8,
+    newOwner,
+  };
+}
+
 

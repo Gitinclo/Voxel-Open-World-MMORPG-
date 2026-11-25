@@ -12,20 +12,36 @@ import {
   CULTIVATION_REALMS,
   HERO_CLASSES,
   INITIAL_INVENTORY,
+  INITIAL_PET,
   INITIAL_SKILLS,
+  INITIAL_WARFARE,
   LINEAGES,
+  PET_EVOLUTION_STAGES,
   applyCraftRecipe,
   applyXpGain,
   advanceCastleCapture,
   attemptCultivationBreakthrough,
+  attemptImperialCastleUpgrade,
+  attemptTrainSiegeTroops,
   checkTicTacToeWinner,
   compute2060BigIntOffsetNs,
   computeHeroPowerStats,
+  computePetEvolutionStage,
   computePlayerDamage,
+  computeWarfarePower,
   createLightsOutPuzzle,
+  feedPetState,
+  getImperialCastleSpec,
+  getPetFormTitle,
+  getPetMood,
+  getPetStatusModifiers,
+  getTotalTroopCount,
   isLightsOutSolved,
+  petCompanionState,
   pickTicTacToeAiMove,
   resolveOfflineLeoReply,
+  resolveTerritoryRally,
+  tickPetState,
   toggleLightsOutGrid,
   isValidSavePayload,
 } from './rules';
@@ -229,4 +245,117 @@ test('GeminIsland Lights Out puzzle toggles orthogonal neighbors and resolves so
   board = toggleLightsOutGrid(board, 4);
   assert.equal(isLightsOutSolved(board), true);
 });
+
+test('3D pet follower hunger/happiness decay, hungry penalty, and mood classification work cleanly', () => {
+  const afterNormal = tickPetState(INITIAL_PET, 50);
+  assert.ok(afterNormal.hunger < INITIAL_PET.hunger);
+  assert.ok(afterNormal.happiness < INITIAL_PET.happiness);
+  assert.equal(getPetMood(85, 90), 'Ecstatic');
+  assert.equal(getPetMood(18, 75), 'Hungry');
+  assert.equal(getPetMood(65, 22), 'Lonely');
+
+  const starvingStart = { ...INITIAL_PET, hunger: 20, happiness: 60 };
+  const wellFedStart = { ...INITIAL_PET, hunger: 80, happiness: 60 };
+  const starvingAfter = tickPetState(starvingStart, 10);
+  const wellFedAfter = tickPetState(wellFedStart, 10);
+  assert.ok(starvingAfter.happiness < wellFedAfter.happiness);
+  assert.equal(starvingAfter.mood, 'Hungry');
+});
+
+test('feeding and petting the 3D companion restores hunger/happiness and levels up bond XP', () => {
+  const hungry = { ...INITIAL_PET, hunger: 40, happiness: 50, level: 1, bondXp: 85 };
+  const fedFish = feedPetState(hungry, 'fish');
+  assert.equal(fedFish.hunger, 74);
+  assert.equal(fedFish.happiness, 66);
+  assert.equal(fedFish.level, 2);
+  assert.equal(fedFish.bondXp, 13);
+
+  const petted = petCompanionState(fedFish);
+  assert.equal(petted.happiness, 84);
+  assert.equal(petted.bondXp, 28);
+  assert.equal(petted.mood, 'Joyful');
+});
+
+test('pet evolution unlocks Radiant and Ascendant stages at thresholds and upgrades status modifiers', () => {
+  assert.equal(INITIAL_PET.evolutionStage, 0);
+  const baseMods = getPetStatusModifiers(INITIAL_PET);
+  assert.equal(baseMods.auraActive, true);
+  assert.equal(baseMods.hpRegenPerSec, PET_EVOLUTION_STAGES[0].hpRegenPerSec);
+  assert.equal(baseMods.atkBonusPct, 0);
+  assert.equal(getPetFormTitle('voxel_fox', 0), 'Voxel Fox');
+
+  // Feeding an apple pushes hunger to 100% and happiness to 98%, unlocking Stage 1 (Radiant)
+  const afterApple = feedPetState(INITIAL_PET, 'apple');
+  assert.equal(afterApple.evolutionStage, 1);
+  assert.equal(getPetFormTitle('voxel_fox', 1), 'Sunlit Kitsune');
+
+  const stage1Mods = getPetStatusModifiers(afterApple);
+  assert.ok(stage1Mods.hpRegenPerSec > baseMods.hpRegenPerSec);
+  assert.ok(stage1Mods.atkBonusPct > baseMods.atkBonusPct);
+  assert.ok(stage1Mods.xpBonusPct > baseMods.xpBonusPct);
+  assert.ok(stage1Mods.speedBonusPct > baseMods.speedBonusPct);
+
+  // Evolution persists even when hunger decays, while starving pauses the active aura
+  const ticked = tickPetState(afterApple, 240);
+  assert.equal(ticked.evolutionStage, 1);
+  assert.equal(getPetStatusModifiers(ticked).auraActive, false);
+
+  // Reaching Bond Lv 2 with >=98% hunger and >=98% happiness unlocks Stage 2 (Ascendant)
+  const nearAscendant = { ...afterApple, hunger: 99, happiness: 99, level: 1, bondXp: 90 };
+  const ascendant = petCompanionState(nearAscendant);
+  assert.equal(ascendant.level, 2);
+  assert.equal(ascendant.evolutionStage, 2);
+  assert.equal(getPetFormTitle('void_pup', 2), 'Cosmic Rift Fenrir');
+  assert.equal(computePetEvolutionStage(2, 50, 50, 1), 2);
+
+  const stage2Mods = getPetStatusModifiers(ascendant);
+  assert.ok(stage2Mods.hpRegenPerSec > stage1Mods.hpRegenPerSec);
+  assert.ok(stage2Mods.atkBonusPct > stage1Mods.atkBonusPct);
+  assert.ok(stage2Mods.xpBonusPct > stage1Mods.xpBonusPct);
+  assert.ok(stage2Mods.speedBonusPct > stage1Mods.speedBonusPct);
+});
+
+test('Voxel Realms Imperial Castle upgrade, 3-branch troop training, and Army Power scale deterministically', () => {
+  const basePower = computeWarfarePower(INITIAL_WARFARE);
+  assert.ok(basePower > 400);
+  assert.equal(getImperialCastleSpec(1).era, 'Timber Keep');
+  assert.equal(getImperialCastleSpec(3).era, 'Stone Bastion');
+  assert.equal(getImperialCastleSpec(9).era, 'Sovereign Imperial Keep');
+
+  // Cannot upgrade without enough Gold & Spirit Stones
+  const tooPoor = attemptImperialCastleUpgrade(INITIAL_WARFARE, 10, 5);
+  assert.equal(tooPoor.ok, false);
+
+  // Valid castle upgrade increases level and barracks capacity
+  const upgraded = attemptImperialCastleUpgrade(INITIAL_WARFARE, 120, 40);
+  assert.equal(upgraded.ok, true);
+  assert.equal(upgraded.warfare.castleLevel, 2);
+  assert.ok(getImperialCastleSpec(2).maxTroops > getImperialCastleSpec(1).maxTroops);
+  assert.ok(computeWarfarePower(upgraded.warfare) > basePower);
+
+  // Train Bombers respects gold & capacity
+  const trained = attemptTrainSiegeTroops(upgraded.warfare, 'bomber', 5, 150);
+  assert.equal(trained.ok, true);
+  assert.equal(trained.warfare.troops.bomber, INITIAL_WARFARE.troops.bomber + 5);
+  assert.equal(trained.gold, 50);
+  assert.equal(getTotalTroopCount(trained.warfare.troops), getTotalTroopCount(INITIAL_WARFARE.troops) + 5);
+});
+
+test('Voxel Realms 9-sector Territory Rally captures contested/Obsidian sectors and awards siege progress', () => {
+  const alreadyDawn = resolveTerritoryRally(INITIAL_WARFARE, 'A1');
+  assert.equal(alreadyDawn.ok, false);
+
+  const contestedWin = resolveTerritoryRally(INITIAL_WARFARE, 'B2');
+  assert.equal(contestedWin.ok, true);
+  assert.equal(contestedWin.newOwner, 'DAWN');
+  assert.equal(contestedWin.warfare.sectors.B2, 'DAWN');
+  assert.ok(contestedWin.obsidianSiegeDelta > 0);
+  assert.equal(contestedWin.warfare.ralliesWon, 1);
+
+  // Wedge Charge increases army power over Shield Wall
+  const wedgePower = computeWarfarePower({ ...INITIAL_WARFARE, formation: 'WEDGE_CHARGE' });
+  const shieldPower = computeWarfarePower({ ...INITIAL_WARFARE, formation: 'SHIELD_WALL' });
+  assert.ok(wedgePower > shieldPower);
+});
+
 

@@ -1,11 +1,23 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { ShadowVoxelEngine } from '../game/engine';
 import {
+  ALL_TERRITORY_SECTORS,
   CULTIVATION_REALMS,
+  MAX_IMPERIAL_CASTLE_LEVEL,
+  PET_EVOLUTION_STAGES,
+  PET_SPECIES_SPECS,
   REALM_SHARDS,
+  SIEGE_FORMATIONS,
+  TROOP_SPECS,
+  WAR_COMMANDERS,
   checkTicTacToeWinner,
   compute2060BigIntOffsetNs,
+  computeWarfarePower,
   createLightsOutPuzzle,
+  getImperialCastleSpec,
+  getPetFormTitle,
+  getPetStatusModifiers,
+  getTotalTroopCount,
   isLightsOutSolved,
   pickTicTacToeAiMove,
   resolveOfflineLeoReply,
@@ -18,7 +30,11 @@ import type {
   HudSnapshot,
   LandmarkKey,
   LeaderboardEntry,
+  PetSpeciesKey,
+  SiegeFormationType,
   SuiteModalKey,
+  TroopBranch,
+  WarCommanderId,
 } from '../game/types';
 
 interface SuiteModalsProps {
@@ -71,9 +87,11 @@ export const SuiteModals: React.FC<SuiteModalsProps> = ({
   const [memeSnapImg, setMemeSnapImg] = useState<HTMLImageElement | null>(null);
   const [memeStatus, setMemeStatus] = useState('Snap a live 3D frame and project it onto all Castle Billboards.');
 
-  // L.E.O. Neural Companion State
+  // L.E.O. Neural Companion & 3D Pet Follower State
   const [leoInput, setLeoInput] = useState('');
   const [leoBusy, setLeoBusy] = useState(false);
+  const [petFeedback, setPetFeedback] = useState<string | null>(null);
+  const [warfareFeedback, setWarfareFeedback] = useState<string | null>(null);
   const [leoMessages, setLeoMessages] = useState<Array<{ sender: string; text: string }>>([
     {
       sender: 'L.E.O.',
@@ -774,11 +792,11 @@ export const SuiteModals: React.FC<SuiteModalsProps> = ({
           </div>
         )}
 
-        {/* 3. L.E.O. AI COMPANION (Tri-Core Assistant + Server-Side /api/leo) */}
+        {/* 3. L.E.O. AI COMPANION + 3D PET FOLLOWER TELEMETRY (Tri-Core Assistant + Server-Side /api/leo) */}
         {activeModal === 'leo' && (
           <div>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="font-display text-lg font-bold text-sky-300">L.E.O. Neural Companion</h2>
+              <h2 className="font-display text-lg font-bold text-sky-300">L.E.O. Neural Companion &amp; Pet Care</h2>
               <button
                 type="button"
                 aria-label="Close L.E.O. Companion"
@@ -788,7 +806,256 @@ export const SuiteModals: React.FC<SuiteModalsProps> = ({
                 Close
               </button>
             </div>
-            <div className="h-[190px] overflow-y-auto realm-scroll rounded-lg border border-slate-800 bg-[#080c17] p-3 text-xs space-y-2 mb-3 select-text">
+
+            {/* 3D Pet Follower Status, Evolution & Modifiers Panel */}
+            {(() => {
+              const stageSpec = PET_EVOLUTION_STAGES[hud.pet.evolutionStage] ?? PET_EVOLUTION_STAGES[0];
+              const nextStage = PET_EVOLUTION_STAGES[hud.pet.evolutionStage + 1] ?? null;
+              const petMods = getPetStatusModifiers(hud.pet);
+              const formTitle = getPetFormTitle(hud.pet.species, hud.pet.evolutionStage);
+              const stageBadgeClass =
+                hud.pet.evolutionStage >= 2
+                  ? 'border-fuchsia-400/70 bg-fuchsia-500/20 text-fuchsia-200'
+                  : hud.pet.evolutionStage === 1
+                    ? 'border-amber-400/70 bg-amber-500/20 text-amber-200'
+                    : 'border-slate-600 bg-slate-800/80 text-slate-300';
+              return (
+                <section
+                  aria-label="3D Pet Follower Status"
+                  className={`rounded-lg border p-3.5 mb-3 space-y-2.5 ${
+                    hud.pet.evolutionStage >= 2
+                      ? 'border-fuchsia-400/50 bg-[#14142b]'
+                      : hud.pet.evolutionStage === 1
+                        ? 'border-amber-400/45 bg-[#121a2d]'
+                        : 'border-sky-500/35 bg-[#10182b]'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-display text-sm font-bold text-amber-300">{hud.pet.name}</span>
+                        <span
+                          data-testid="pet-evolution-stage"
+                          className={`rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${stageBadgeClass}`}
+                        >
+                          Stage {hud.pet.evolutionStage} · {stageSpec.tierName}
+                        </span>
+                        <span className="text-[11px] font-mono-tabular text-slate-300">
+                          {formTitle} · Bond Lv {hud.pet.level} ({hud.pet.bondXp}/100 XP)
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        Mood:{' '}
+                        <span
+                          className={`font-semibold ${
+                            hud.pet.mood === 'Ecstatic' || hud.pet.mood === 'Joyful'
+                              ? 'text-emerald-300'
+                              : hud.pet.mood === 'Content'
+                                ? 'text-sky-300'
+                                : 'text-rose-300'
+                          }`}
+                        >
+                          {hud.pet.mood}
+                        </span>
+                        <span className={petMods.auraActive ? 'text-emerald-400/90 ml-2' : 'text-rose-300/90 ml-2'}>
+                          · {petMods.auraLabel}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {(['voxel_fox', 'emerald_slime', 'void_pup'] as PetSpeciesKey[]).map((sp) => (
+                        <button
+                          key={sp}
+                          type="button"
+                          onClick={() => {
+                            engine?.setPetSpecies(sp);
+                            setPetFeedback(
+                              `${hud.pet.name} switched form to ${getPetFormTitle(sp, hud.pet.evolutionStage)}.`,
+                            );
+                          }}
+                          className={`rounded border px-2 py-1 text-[11px] font-medium cursor-pointer ${
+                            hud.pet.species === sp
+                              ? 'border-amber-400 bg-amber-500/20 text-amber-200'
+                              : 'border-slate-700 bg-[#152038] text-slate-300 hover:border-slate-500'
+                          }`}
+                        >
+                          {PET_SPECIES_SPECS[sp].label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Hunger & Happiness Progress Meters */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <div className="flex justify-between text-xs font-mono-tabular mb-1">
+                        <span className="text-amber-300 font-semibold">Hunger</span>
+                        <span data-testid="pet-hunger-value" className="text-slate-100">
+                          {hud.pet.hunger}%
+                        </span>
+                      </div>
+                      <div className="h-2.5 w-full rounded-sm bg-slate-950 overflow-hidden border border-slate-800">
+                        <div
+                          className={`h-full transition-all duration-200 ${
+                            hud.pet.hunger < 30 ? 'bg-rose-500' : hud.pet.hunger < 60 ? 'bg-amber-400' : 'bg-emerald-400'
+                          }`}
+                          style={{ width: `${Math.max(0, Math.min(100, hud.pet.hunger))}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs font-mono-tabular mb-1">
+                        <span className="text-pink-300 font-semibold">Happiness</span>
+                        <span data-testid="pet-happiness-value" className="text-slate-100">
+                          {hud.pet.happiness}%
+                        </span>
+                      </div>
+                      <div className="h-2.5 w-full rounded-sm bg-slate-950 overflow-hidden border border-slate-800">
+                        <div
+                          className={`h-full transition-all duration-200 ${
+                            hud.pet.happiness < 35 ? 'bg-rose-500' : hud.pet.happiness < 65 ? 'bg-sky-400' : 'bg-pink-400'
+                          }`}
+                          style={{ width: `${Math.max(0, Math.min(100, hud.pet.happiness))}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Active Status Modifiers & Evolution Threshold */}
+                  <div
+                    data-testid="pet-modifiers"
+                    className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 rounded border border-slate-800 bg-[#0b1020] px-2.5 py-2 font-mono-tabular"
+                  >
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-slate-400">HP Regen</div>
+                      <div
+                        data-testid="pet-mod-regen"
+                        className={`text-xs font-bold ${
+                          hud.pet.evolutionStage >= 2
+                            ? 'text-fuchsia-300'
+                            : hud.pet.evolutionStage === 1
+                              ? 'text-amber-300'
+                              : 'text-emerald-300'
+                        }`}
+                      >
+                        +{petMods.hpRegenPerSec.toFixed(1)}/s
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-slate-400">ATK Bonus</div>
+                      <div
+                        data-testid="pet-mod-atk"
+                        className={`text-xs font-bold ${
+                          petMods.atkBonusPct > 0
+                            ? hud.pet.evolutionStage >= 2
+                              ? 'text-fuchsia-300'
+                              : 'text-amber-300'
+                            : 'text-slate-400'
+                        }`}
+                      >
+                        +{petMods.atkBonusPct}%
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-slate-400">XP Bonus</div>
+                      <div
+                        data-testid="pet-mod-xp"
+                        className={`text-xs font-bold ${
+                          hud.pet.evolutionStage >= 2
+                            ? 'text-fuchsia-300'
+                            : hud.pet.evolutionStage === 1
+                              ? 'text-amber-300'
+                              : 'text-sky-300'
+                        }`}
+                      >
+                        +{petMods.xpBonusPct}%
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-slate-400">Move Speed</div>
+                      <div
+                        data-testid="pet-mod-speed"
+                        className={`text-xs font-bold ${
+                          petMods.speedBonusPct > 0
+                            ? hud.pet.evolutionStage >= 2
+                              ? 'text-fuchsia-300'
+                              : 'text-amber-300'
+                            : 'text-slate-400'
+                        }`}
+                      >
+                        +{petMods.speedBonusPct}%
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
+                    {nextStage ? (
+                      <span>
+                        Next Evolution (<strong className="text-amber-200">{nextStage.tierName}</strong>): Hunger ≥{' '}
+                        <span className="font-mono-tabular text-slate-200">{nextStage.minHunger}%</span>, Happiness ≥{' '}
+                        <span className="font-mono-tabular text-slate-200">{nextStage.minHappiness}%</span>
+                        {nextStage.minBondLevel > 1 && (
+                          <>
+                            , Bond Lv <span className="font-mono-tabular text-slate-200">{nextStage.minBondLevel}</span>
+                          </>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="text-fuchsia-300 font-semibold">
+                        ★ Max Ascendant Evolution Unlocked — Full Celestial Modifiers Active
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Care Actions */}
+                  <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = engine?.feedPet('apple');
+                        if (res) setPetFeedback(res.message);
+                      }}
+                      className="rounded bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-2.5 py-1.5 text-xs cursor-pointer"
+                    >
+                      Feed Apple ({hud.inventory.apples})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = engine?.feedPet('fish');
+                        if (res) setPetFeedback(res.message);
+                      }}
+                      className="rounded bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-2.5 py-1.5 text-xs cursor-pointer"
+                    >
+                      Feed Fish ({hud.inventory.fish})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = engine?.feedPet('treat');
+                        if (res) setPetFeedback(res.message);
+                      }}
+                      className="rounded border border-amber-500/60 bg-amber-950/60 hover:bg-amber-900/70 text-amber-200 font-semibold px-2.5 py-1.5 text-xs cursor-pointer"
+                    >
+                      Give Treat (5G)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = engine?.petCompanion();
+                        if (res) setPetFeedback(res.message);
+                      }}
+                      className="rounded bg-pink-500 hover:bg-pink-400 text-slate-950 font-bold px-3 py-1.5 text-xs cursor-pointer"
+                    >
+                      Pet &amp; Play
+                    </button>
+                  </div>
+                  {petFeedback && <div className="text-[11px] text-amber-200">{petFeedback}</div>}
+                </section>
+              );
+            })()}
+
+            <div className="h-[156px] overflow-y-auto realm-scroll rounded-lg border border-slate-800 bg-[#080c17] p-3 text-xs space-y-2 mb-3 select-text">
               {leoMessages.map((m, idx) => (
                 <div key={idx} className={m.sender.startsWith('L.E.O.') ? 'text-sky-200' : 'text-slate-200'}>
                   <strong className="text-amber-300">[{m.sender}]</strong> {m.text}
@@ -1824,6 +2091,315 @@ export const SuiteModals: React.FC<SuiteModalsProps> = ({
             )}
           </div>
         )}
+
+        {/* 11. VOXEL REALMS RPG: IMPERIAL CASTLE WARFARE & 9-SECTOR SIEGE COMMAND (Repo #4) */}
+        {activeModal === 'warfare' &&
+          (() => {
+            const w = hud.warfare;
+            const castleSpec = getImperialCastleSpec(w.castleLevel);
+            const totalTroops = getTotalTroopCount(w.troops);
+            const armyPower = computeWarfarePower(w);
+            const dawnCount = ALL_TERRITORY_SECTORS.filter((s) => w.sectors[s] === 'DAWN').length;
+            const isMaxCastle = w.castleLevel >= MAX_IMPERIAL_CASTLE_LEVEL;
+            const activeForm = SIEGE_FORMATIONS[w.formation];
+            return (
+              <div className="space-y-3">
+                <div className="flex flex-wrap sm:flex-nowrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <h2 className="font-display text-lg font-bold text-amber-300 leading-tight">
+                      Voxel Realms — Imperial Castle Warfare
+                    </h2>
+                    <div className="text-[11px] font-mono-tabular text-slate-400 mt-0.5">
+                      <span data-testid="warfare-castle-era" className="text-amber-200 font-semibold">
+                        Lv {castleSpec.level}/{MAX_IMPERIAL_CASTLE_LEVEL} {castleSpec.era}
+                      </span>{' '}
+                      · Army Power{' '}
+                      <span data-testid="warfare-army-power" className="text-sky-300 font-bold">
+                        {armyPower}
+                      </span>{' '}
+                      · Barracks{' '}
+                      <span data-testid="warfare-troop-count" className="text-emerald-300">
+                        {totalTroops}/{castleSpec.maxTroops}
+                      </span>{' '}
+                      · Dawn {dawnCount}/9
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      disabled={isMaxCastle}
+                      onClick={() => {
+                        const res = engine?.upgradeImperialCastle();
+                        if (res) setWarfareFeedback(res.message);
+                      }}
+                      className="rounded bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold px-2.5 py-1.5 text-xs whitespace-nowrap cursor-pointer"
+                    >
+                      {isMaxCastle
+                        ? 'Max Castle Lv 10'
+                        : `Upgrade Keep (${castleSpec.upgradeGold}G · ${castleSpec.upgradeStones} Stones)`}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Close Castle Warfare"
+                      onClick={onCloseModal}
+                      className="rounded border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:text-white cursor-pointer"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+
+                {/* Live 3D Siege Battlefield Actions */}
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/35 bg-[#12192d] px-3 py-2">
+                  <div className="text-xs text-slate-300">
+                    Gold <strong className="font-mono-tabular text-amber-300">{hud.gold}</strong> · Spirit Stones{' '}
+                    <strong className="font-mono-tabular text-sky-300">{hud.spiritStones}</strong> · Rallies Won{' '}
+                    <strong className="font-mono-tabular text-emerald-300">{w.ralliesWon}</strong>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        engine?.toggleCohortDeployed();
+                        setWarfareFeedback(
+                          w.cohortDeployed
+                            ? '3D Siege Cohort garrisoned inside Imperial Keep.'
+                            : `3D Siege Cohort deployed in ${activeForm.label} formation!`,
+                        );
+                      }}
+                      className={`rounded border px-3 py-1.5 text-xs font-semibold cursor-pointer ${
+                        w.cohortDeployed
+                          ? 'border-emerald-400/70 bg-emerald-500/20 text-emerald-200'
+                          : 'border-slate-600 bg-slate-800 text-slate-200 hover:border-slate-400'
+                      }`}
+                    >
+                      {w.cohortDeployed ? '3D Cohort: Deployed' : 'Deploy 3D Cohort'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={w.trebuchetCooldownSec > 0}
+                      onClick={() => {
+                        const res = engine?.fireSiegeTrebuchet();
+                        if (res) setWarfareFeedback(res.message);
+                      }}
+                      className="rounded bg-orange-500 hover:bg-orange-400 disabled:opacity-50 text-slate-950 font-bold px-3 py-1.5 text-xs cursor-pointer"
+                    >
+                      {w.trebuchetCooldownSec > 0
+                        ? `Trebuchet Reloading (${w.trebuchetCooldownSec}s)`
+                        : 'Fire 3D Trebuchet Volley'}
+                    </button>
+                  </div>
+                </div>
+
+                {warfareFeedback && (
+                  <div
+                    data-testid="warfare-feedback"
+                    className="rounded border border-sky-500/35 bg-[#0c1426] px-3 py-1.5 text-xs text-amber-200"
+                  >
+                    {warfareFeedback}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  {/* Left: 3-Branch Troop Barracks + War Commanders */}
+                  <div className="space-y-3">
+                    <section className="rounded-lg border border-slate-800 bg-[#0d1424] p-3 space-y-2">
+                      <div className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                        3-Branch Siege Barracks
+                      </div>
+                      {(['shieldbearer', 'shooter', 'bomber'] as TroopBranch[]).map((branch) => {
+                        const spec = TROOP_SPECS[branch];
+                        return (
+                          <div
+                            key={branch}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-800 bg-[#121a2f] px-2.5 py-2"
+                          >
+                            <div>
+                              <div className="text-xs font-bold text-slate-100">
+                                {spec.label}{' '}
+                                <span
+                                  data-testid={`troop-count-${branch}`}
+                                  className="font-mono-tabular text-sky-300 ml-1"
+                                >
+                                  x{w.troops[branch]}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-slate-400">
+                                {spec.role} · {spec.power} PWR · {spec.costGold}G each
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const res = engine?.trainSiegeTroops(branch, 1);
+                                  if (res) setWarfareFeedback(res.message);
+                                }}
+                                className="rounded bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-2.5 py-1 text-[11px] cursor-pointer"
+                              >
+                                +1 ({spec.costGold}G)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const res = engine?.trainSiegeTroops(branch, 5);
+                                  if (res) setWarfareFeedback(res.message);
+                                }}
+                                className="rounded border border-sky-400/50 bg-sky-950/60 hover:bg-sky-900/70 text-sky-200 font-semibold px-2.5 py-1 text-[11px] cursor-pointer"
+                              >
+                                +5 ({spec.costGold * 5}G)
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </section>
+
+                    {/* War Commanders */}
+                    <section className="rounded-lg border border-slate-800 bg-[#0d1424] p-3 space-y-2">
+                      <div className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                        Active War Commander
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                        {(['arthur', 'lyra', 'aiden'] as WarCommanderId[]).map((cid) => {
+                          const cmd = WAR_COMMANDERS[cid];
+                          const active = w.commanderId === cid;
+                          return (
+                            <button
+                              key={cid}
+                              type="button"
+                              onClick={() => {
+                                engine?.setWarCommander(cid);
+                                setWarfareFeedback(`${cmd.name} (${cmd.skillName}) now commands your Siege Cohort.`);
+                              }}
+                              className={`text-left rounded border p-2 cursor-pointer transition-colors ${
+                                active
+                                  ? 'border-amber-400 bg-amber-500/15 text-amber-100'
+                                  : 'border-slate-800 bg-[#121a2f] text-slate-300 hover:border-slate-600'
+                              }`}
+                            >
+                              <div className="text-xs font-bold">{cmd.name}</div>
+                              <div className="text-[10px] text-amber-300/90">{cmd.skillName}</div>
+                              <div className="text-[10px] text-slate-400 mt-0.5">{cmd.bonusDesc}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  </div>
+
+                  {/* Right: Tactical Formations + 9-Sector Territory War Map + Active Modifiers */}
+                  <div className="space-y-3">
+                    <section className="rounded-lg border border-slate-800 bg-[#0d1424] p-3 space-y-2">
+                      <div className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                        Tactical 3D Siege Formation
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {(
+                          ['SHIELD_WALL', 'WEDGE_CHARGE', 'LOOSE_SKIRMISH', 'PHALANX_ADVANCE'] as SiegeFormationType[]
+                        ).map((fKey) => {
+                          const f = SIEGE_FORMATIONS[fKey];
+                          const active = w.formation === fKey;
+                          return (
+                            <button
+                              key={fKey}
+                              type="button"
+                              onClick={() => {
+                                engine?.setSiegeFormation(fKey);
+                                setWarfareFeedback(`3D Cohort shifted to ${f.label}: ${f.shortDesc}`);
+                              }}
+                              className={`text-left rounded border p-2 cursor-pointer transition-colors ${
+                                active
+                                  ? 'border-sky-400 bg-sky-500/20 text-sky-100'
+                                  : 'border-slate-800 bg-[#121a2f] text-slate-300 hover:border-slate-600'
+                              }`}
+                            >
+                              <div className="text-xs font-bold">{f.label}</div>
+                              <div className="text-[10px] text-slate-400 mt-0.5">{f.shortDesc}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </section>
+
+                    <section className="rounded-lg border border-slate-800 bg-[#0d1424] p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                          9-Sector Territory Grid (Click to Rally)
+                        </div>
+                        <span className="text-[11px] font-mono-tabular text-sky-300 whitespace-nowrap shrink-0">
+                          {dawnCount}/9 Dawn
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {ALL_TERRITORY_SECTORS.map((sec) => {
+                          const owner = w.sectors[sec];
+                          const style =
+                            owner === 'DAWN'
+                              ? 'border-sky-500/60 bg-sky-500/20 text-sky-200'
+                              : owner === 'CONTESTED'
+                                ? 'border-amber-400/70 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25'
+                                : 'border-rose-500/70 bg-rose-500/15 text-rose-200 hover:bg-rose-500/25';
+                          return (
+                            <button
+                              key={sec}
+                              type="button"
+                              data-testid={`sector-${sec}`}
+                              onClick={() => {
+                                const res = engine?.launchTerritoryRally(sec);
+                                if (res) setWarfareFeedback(res.message);
+                              }}
+                              className={`rounded border px-2 py-1.5 text-center cursor-pointer transition-colors ${style}`}
+                            >
+                              <div className="font-mono-tabular text-xs font-bold">{sec}</div>
+                              <div className="text-[10px] uppercase tracking-wider">{owner}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </section>
+
+                    <section className="rounded-lg border border-slate-800 bg-[#0d1424] p-3 space-y-1.5">
+                      <div className="flex flex-wrap items-center justify-between gap-1.5">
+                        <div className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                          Battlefield Modifiers
+                        </div>
+                        <span className="text-[10px] font-mono-tabular text-amber-300 whitespace-nowrap">
+                          Trebuchet [E] (15, 23)
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1.5 font-mono-tabular text-center">
+                        <div className="rounded border border-slate-800 bg-[#121a2f] py-1.5 px-1">
+                          <div className="text-[10px] text-slate-400">ATK</div>
+                          <div data-testid="warfare-mod-atk" className="text-xs font-bold text-amber-300">
+                            +{activeForm.heroAtkBonusPct}%
+                          </div>
+                        </div>
+                        <div className="rounded border border-slate-800 bg-[#121a2f] py-1.5 px-1">
+                          <div className="text-[10px] text-slate-400">DMG RED</div>
+                          <div data-testid="warfare-mod-def" className="text-xs font-bold text-emerald-300">
+                            {activeForm.heroDmgReductionPct}%
+                          </div>
+                        </div>
+                        <div className="rounded border border-slate-800 bg-[#121a2f] py-1.5 px-1">
+                          <div className="text-[10px] text-slate-400">SPEED</div>
+                          <div data-testid="warfare-mod-spd" className="text-xs font-bold text-sky-300">
+                            +{activeForm.heroSpeedBonusPct}%
+                          </div>
+                        </div>
+                        <div className="rounded border border-slate-800 bg-[#121a2f] py-1.5 px-1">
+                          <div className="text-[10px] text-slate-400">CAPTURE</div>
+                          <div data-testid="warfare-mod-cap" className="text-xs font-bold text-fuchsia-300">
+                            +{Math.round((activeForm.captureMult - 1) * 100)}%
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
       </div>
     </div>
   );

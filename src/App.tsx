@@ -8,8 +8,10 @@ import {
   HERO_CLASSES,
   INITIAL_INVENTORY,
   INITIAL_LORA,
+  INITIAL_PET,
   INITIAL_QUESTS,
   INITIAL_SKILLS,
+  INITIAL_WARFARE,
   LINEAGES,
   REALM_SHARDS,
 } from './game/rules';
@@ -84,6 +86,12 @@ const INITIAL_HUD: HudSnapshot = {
   elapsedSec: 0,
   pitchSemitones: 0,
   cinemaChannel: 'cyber',
+  pet: { ...INITIAL_PET },
+  warfare: {
+    ...INITIAL_WARFARE,
+    troops: { ...INITIAL_WARFARE.troops },
+    sectors: { ...INITIAL_WARFARE.sectors },
+  },
 };
 
 export default function App() {
@@ -187,6 +195,7 @@ export default function App() {
         KeyK: 'skills',
         KeyU: 'guilds',
         KeyJ: 'arcade',
+        KeyH: 'warfare',
         KeyL: 'leo',
         KeyM: 'meme',
         KeyO: 'omni',

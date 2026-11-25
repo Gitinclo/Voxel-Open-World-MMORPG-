@@ -20,6 +20,7 @@ export type SuiteModalKey =
   | 'skills'
   | 'guilds'
   | 'arcade'
+  | 'warfare'
   | 'leo'
   | 'meme'
   | 'omni'
@@ -149,6 +150,66 @@ export interface LoraWeights {
   magnet: number;
 }
 
+export type PetSpeciesKey = 'voxel_fox' | 'emerald_slime' | 'void_pup';
+
+export type PetMood = 'Ecstatic' | 'Joyful' | 'Content' | 'Hungry' | 'Lonely';
+
+export type PetEvolutionStage = 0 | 1 | 2;
+
+export interface PetStatusModifiers {
+  auraActive: boolean;
+  hpRegenPerSec: number;
+  atkBonusPct: number;
+  xpBonusPct: number;
+  speedBonusPct: number;
+  auraLabel: string;
+}
+
+export interface PetState {
+  name: string;
+  species: PetSpeciesKey;
+  hunger: number;
+  happiness: number;
+  mood: PetMood;
+  level: number;
+  bondXp: number;
+  evolutionStage: PetEvolutionStage;
+}
+
+export type TroopBranch = 'shieldbearer' | 'shooter' | 'bomber';
+
+export type SiegeFormationType =
+  | 'SHIELD_WALL'
+  | 'WEDGE_CHARGE'
+  | 'LOOSE_SKIRMISH'
+  | 'PHALANX_ADVANCE';
+
+export type WarCommanderId = 'arthur' | 'lyra' | 'aiden';
+
+export type TerritorySectorCode =
+  | 'A1'
+  | 'A2'
+  | 'A3'
+  | 'B1'
+  | 'B2'
+  | 'B3'
+  | 'C1'
+  | 'C2'
+  | 'C3';
+
+export type SectorOwner = 'DAWN' | 'CONTESTED' | 'OBSIDIAN';
+
+export interface CastleWarfareState {
+  castleLevel: number;
+  troops: Record<TroopBranch, number>;
+  formation: SiegeFormationType;
+  commanderId: WarCommanderId;
+  sectors: Record<TerritorySectorCode, SectorOwner>;
+  cohortDeployed: boolean;
+  trebuchetCooldownSec: number;
+  ralliesWon: number;
+}
+
 export interface QuestProgress {
   captureObsidian: boolean;
   adsBlockedTarget: number;
@@ -251,6 +312,8 @@ export interface HudSnapshot {
   elapsedSec: number;
   pitchSemitones: number;
   cinemaChannel: CinemaChannel;
+  pet: PetState;
+  warfare: CastleWarfareState;
 }
 
 export interface SavePayload {
@@ -280,6 +343,8 @@ export interface SavePayload {
   inventory: InventoryState;
   lora: LoraWeights;
   quests: QuestProgress;
+  pet?: PetState;
+  warfare?: CastleWarfareState;
   x: number;
   z: number;
 }
