@@ -1,0 +1,1114 @@
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import type { ShadowVoxelEngine } from '../game/engine';
+import { compute2060BigIntOffsetNs, resolveOfflineLeoReply } from '../game/rules';
+import type { HudSnapshot, LandmarkKey, SuiteModalKey } from '../game/types';
+
+interface SuiteModalsProps {
+  engine: ShadowVoxelEngine | null;
+  hud: HudSnapshot;
+  activeModal: SuiteModalKey;
+  onCloseModal: () => void;
+  onResume: () => void;
+  onRestart: () => void;
+  onReturnTitle: () => void;
+}
+
+const AI_MEME_CAPTIONS: Array<[string, string]> = [
+  ['20 GITHUB REPOS COMBINED', 'INTO ONE 3D OPEN-WORLD MMORPG'],
+  ['ENTERS SHADOW RIFT AT LV 1', 'MALAKOR: ALLOW ME TO INTRODUCE MYSELF'],
+  ['POP-UP SPAM DRONE APPEARS', 'AD-BLOCKER SHIELD: NOT TODAY'],
+  ['CAPTURED OBSIDIAN CITADEL SOLO', 'LOOK AT ME, I AM THE LORD NOW'],
+  ['C++ + TYPESCRIPT + KOTLIN', 'THE INFINITY CORE STACK'],
+];
+
+const BARD_NOTES: Array<{ label: string; hz: number }> = [
+  { label: 'C4', hz: 261.63 },
+  { label: 'D4', hz: 293.66 },
+  { label: 'E4', hz: 329.63 },
+  { label: 'G4', hz: 392.0 },
+  { label: 'A4', hz: 440.0 },
+  { label: 'C5', hz: 523.25 },
+  { label: 'E5', hz: 659.25 },
+];
+
+export const SuiteModals: React.FC<SuiteModalsProps> = ({
+  engine,
+  hud,
+  activeModal,
+  onCloseModal,
+  onResume,
+  onRestart,
+  onReturnTitle,
+}) => {
+  // MemeForge Studio State (Undo/Redo history + Captions + Filter)
+  const memeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const vizCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [memeTop, setMemeTop] = useState('20 GITHUB REPOS COMBINED');
+  const [memeBottom, setMemeBottom] = useState('INTO ONE 3D MMORPG');
+  const [memeFilter, setMemeFilter] = useState<'none' | 'sora' | 'shadow' | 'crt'>('none');
+  const [memeHistory, setMemeHistory] = useState<Array<{ top: string; bottom: string }>>([
+    { top: '20 GITHUB REPOS COMBINED', bottom: 'INTO ONE 3D MMORPG' },
+  ]);
+  const [memeHistIdx, setMemeHistIdx] = useState(0);
+  const [memeSnapImg, setMemeSnapImg] = useState<HTMLImageElement | null>(null);
+  const [memeStatus, setMemeStatus] = useState('Snap a live 3D frame and project it onto all Castle Billboards.');
+
+  // L.E.O. Neural Companion State
+  const [leoInput, setLeoInput] = useState('');
+  const [leoBusy, setLeoBusy] = useState(false);
+  const [leoMessages, setLeoMessages] = useState<Array<{ sender: string; text: string }>>([
+    {
+      sender: 'L.E.O.',
+      text: 'Tri-Core Neural Companion online. Ask me for boss locations, dungeon portals, crafting tips, or click a quick command below.',
+    },
+  ]);
+
+  // 2060 BigInt Epoch Clock for GM Command Desk
+  const [epochClock, setEpochClock] = useState(() => compute2060BigIntOffsetNs());
+
+  useEffect(() => {
+    if (activeModal !== 'gm') return;
+    const id = window.setInterval(() => setEpochClock(compute2060BigIntOffsetNs()), 250);
+    return () => window.clearInterval(id);
+  }, [activeModal]);
+
+  // Render MemeForge Preview Canvas
+  const drawMemePreview = useCallback(() => {
+    const cvs = memeCanvasRef.current;
+    if (!cvs) return;
+    const ctx = cvs.getContext('2d');
+    if (!ctx) return;
+
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, 512, 320);
+
+    if (memeSnapImg) {
+      ctx.drawImage(memeSnapImg, 0, 0, 512, 320);
+    } else {
+      const grad = ctx.createLinearGradient(0, 0, 512, 320);
+      grad.addColorStop(0, '#1e1b4b');
+      grad.addColorStop(1, '#4c1d95');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 512, 320);
+    }
+
+    if (memeFilter === 'sora') {
+      ctx.fillStyle = 'rgba(236, 72, 153, 0.22)';
+      ctx.fillRect(0, 0, 512, 320);
+    } else if (memeFilter === 'shadow') {
+      ctx.fillStyle = 'rgba(88, 28, 135, 0.36)';
+      ctx.fillRect(0, 0, 512, 320);
+    } else if (memeFilter === 'crt') {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+      for (let y = 0; y < 320; y += 6) ctx.fillRect(0, y, 512, 2);
+    }
+
+    ctx.font = '900 28px Impact, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = '#000000';
+    ctx.fillStyle = '#ffffff';
+    const top = memeTop.toUpperCase();
+    const bot = memeBottom.toUpperCase();
+    if (top) {
+      ctx.strokeText(top, 256, 42, 488);
+      ctx.fillText(top, 256, 42, 488);
+    }
+    if (bot) {
+      ctx.strokeText(bot, 256, 298, 488);
+      ctx.fillText(bot, 256, 298, 488);
+    }
+  }, [memeTop, memeBottom, memeFilter, memeSnapImg]);
+
+  const snapLive3D = useCallback(() => {
+    if (!engine) return;
+    const dataUrl = engine.captureCanvasDataUrl();
+    const img = new Image();
+    img.onload = () => {
+      setMemeSnapImg(img);
+      setMemeStatus('Captured live 3D realm viewport.');
+    };
+    img.src = dataUrl;
+  }, [engine]);
+
+  useEffect(() => {
+    if (activeModal === 'meme') {
+      snapLive3D();
+    }
+  }, [activeModal, snapLive3D]);
+
+  useEffect(() => {
+    if (activeModal === 'meme') {
+      drawMemePreview();
+    }
+  }, [activeModal, drawMemePreview]);
+
+  // Real-time Web Audio Frequency Visualizer inside MemeForge modal
+  useEffect(() => {
+    if (activeModal !== 'meme' || !engine) return;
+    let timer = 0;
+    const drawViz = () => {
+      const cvs = vizCanvasRef.current;
+      if (cvs) {
+        const ctx = cvs.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#080c17';
+          ctx.fillRect(0, 0, cvs.width, cvs.height);
+          const bins = engine.audio.getFrequencyData();
+          if (bins) {
+            const barW = cvs.width / bins.length;
+            for (let i = 0; i < bins.length; i++) {
+              const h = (bins[i] / 255) * (cvs.height - 6);
+              ctx.fillStyle = i % 2 === 0 ? '#38bdf8' : '#c084fc';
+              ctx.fillRect(i * barW + 1, cvs.height - h, Math.max(2, barW - 2), h);
+            }
+          }
+        }
+      }
+      timer = window.setTimeout(drawViz, 60);
+    };
+    drawViz();
+    return () => window.clearTimeout(timer);
+  }, [activeModal, engine]);
+
+  const pushMemeCaption = (top: string, bottom: string) => {
+    setMemeTop(top);
+    setMemeBottom(bottom);
+    const sliced = memeHistory.slice(0, memeHistIdx + 1);
+    const next = [...sliced, { top, bottom }];
+    setMemeHistory(next);
+    setMemeHistIdx(next.length - 1);
+  };
+
+  const handleAskLeo = async (promptOverride?: string) => {
+    const q = (promptOverride ?? leoInput).trim();
+    if (!q || leoBusy) return;
+    setLeoInput('');
+    setLeoMessages((prev) => [...prev, { sender: hud.playerName, text: q }]);
+
+    const questsCompleted = [
+      hud.quests.captureObsidian,
+      hud.quests.adsBlocked >= hud.quests.adsBlockedTarget,
+      hud.quests.memeProjected,
+      hud.quests.defeatMalakor,
+      hud.quests.defeatVoryn,
+      hud.quests.catchFish,
+      hud.quests.driveBuggy,
+    ].filter(Boolean).length;
+
+    const offline = resolveOfflineLeoReply(q, {
+      biome: hud.biome,
+      hp: hud.hp,
+      maxHp: hud.maxHp,
+      level: hud.level,
+      questsCompleted,
+    });
+
+    // If user asked a direct built-in navigation/game command, answer immediately; also try server-side Gemini for open-ended queries
+    if (offline.teleportTarget || promptOverride) {
+      setLeoMessages((prev) => [...prev, { sender: 'L.E.O.', text: offline.reply }]);
+      return;
+    }
+
+    setLeoBusy(true);
+    try {
+      const resp = await fetch('/api/leo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: q,
+          context: { level: hud.level, biome: hud.biome, hp: hud.hp, maxHp: hud.maxHp },
+        }),
+      });
+      if (resp.ok) {
+        const data = (await resp.json()) as { reply?: string };
+        setLeoMessages((prev) => [...prev, { sender: 'L.E.O. (Cloud AI)', text: data.reply || offline.reply }]);
+      } else {
+        setLeoMessages((prev) => [...prev, { sender: 'L.E.O.', text: offline.reply }]);
+      }
+    } catch {
+      setLeoMessages((prev) => [...prev, { sender: 'L.E.O.', text: offline.reply }]);
+    } finally {
+      setLeoBusy(false);
+    }
+  };
+
+  // =========================================================================
+  // PAUSE MODAL
+  // =========================================================================
+  if (hud.phase === 'paused') {
+    return (
+      <div className="fixed inset-0 z-50 bg-[#050811]/82 flex items-center justify-center p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pause-heading"
+          className="w-full max-w-sm rounded-xl border border-amber-500/40 bg-[#0c1120] p-6 shadow-2xl"
+        >
+          <h2 id="pause-heading" className="font-display text-xl font-bold text-slate-50 mb-1">
+            Realm Paused
+          </h2>
+          <p className="text-xs text-slate-400 mb-5">
+            {hud.biome} · Level {hud.level} {hud.className}
+          </p>
+
+          <div className="grid grid-cols-3 gap-2 mb-5 text-center">
+            <div className="rounded-lg border border-slate-800 bg-[#12192c] p-2.5">
+              <div className="text-[10px] text-slate-400 uppercase">Kills</div>
+              <div className="font-mono-tabular text-base font-bold text-slate-100">{hud.kills}</div>
+            </div>
+            <div className="rounded-lg border border-slate-800 bg-[#12192c] p-2.5">
+              <div className="text-[10px] text-slate-400 uppercase">Gold</div>
+              <div className="font-mono-tabular text-base font-bold text-amber-300">{hud.gold}</div>
+            </div>
+            <div className="rounded-lg border border-slate-800 bg-[#12192c] p-2.5">
+              <div className="text-[10px] text-slate-400 uppercase">Ads Blocked</div>
+              <div className="font-mono-tabular text-base font-bold text-sky-300">{hud.adsBlocked}</div>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={onResume}
+              className="w-full rounded-lg bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold py-2.5 text-sm cursor-pointer"
+            >
+              Resume Adventure
+            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => engine?.quickSave()}
+                className="rounded-lg border border-slate-700 bg-[#141c30] hover:border-slate-500 text-slate-100 py-2 text-xs font-semibold cursor-pointer"
+              >
+                Quick Save (F5)
+              </button>
+              <button
+                type="button"
+                onClick={() => engine?.quickLoad()}
+                className="rounded-lg border border-slate-700 bg-[#141c30] hover:border-slate-500 text-slate-100 py-2 text-xs font-semibold cursor-pointer"
+              >
+                Quick Load (F9)
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={onRestart}
+                className="rounded-lg border border-slate-700 bg-[#141c30] hover:border-slate-500 text-slate-200 py-2 text-xs font-semibold cursor-pointer"
+              >
+                Restart Run
+              </button>
+              <button
+                type="button"
+                onClick={onReturnTitle}
+                className="rounded-lg border border-slate-700 bg-[#141c30] hover:border-slate-500 text-slate-300 py-2 text-xs font-semibold cursor-pointer"
+              >
+                Title Screen
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // GAME OVER / VICTORY MODAL
+  // =========================================================================
+  if (hud.phase === 'gameover') {
+    const isVictory = hud.outcome === 'victory';
+    return (
+      <div className="fixed inset-0 z-50 bg-[#050811]/86 flex items-center justify-center p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="outcome-heading"
+          className="w-full max-w-md rounded-xl border border-amber-500/45 bg-[#0c1120] p-6 shadow-2xl"
+        >
+          <h2 id="outcome-heading" className="font-display text-2xl font-bold text-slate-50 mb-1">
+            {isVictory ? 'Realm Ascendant — Victory' : 'Fallen in the ShadowRealm'}
+          </h2>
+          <p className="text-xs text-slate-400 mb-5">
+            {isVictory
+              ? 'You conquered Obsidian Citadel and vanquished both Malakor and Voryn.'
+              : `Defeated in ${hud.biome} at Level ${hud.level}.`}
+          </p>
+
+          <div className="grid grid-cols-3 gap-2.5 mb-6 text-center">
+            <div className="rounded-lg border border-slate-800 bg-[#12192c] p-3">
+              <div className="text-[10px] text-slate-400 uppercase">Level</div>
+              <div className="font-mono-tabular text-lg font-bold text-amber-400">{hud.level}</div>
+            </div>
+            <div className="rounded-lg border border-slate-800 bg-[#12192c] p-3">
+              <div className="text-[10px] text-slate-400 uppercase">Foes Slain</div>
+              <div className="font-mono-tabular text-lg font-bold text-slate-100">{hud.kills}</div>
+            </div>
+            <div className="rounded-lg border border-slate-800 bg-[#12192c] p-3">
+              <div className="text-[10px] text-slate-400 uppercase">Castles Held</div>
+              <div className="font-mono-tabular text-lg font-bold text-sky-400">{hud.blueCastles}/2</div>
+            </div>
+          </div>
+
+          <div className="flex gap-2.5">
+            <button
+              type="button"
+              data-start="true"
+              onClick={onRestart}
+              className="flex-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold py-2.5 text-sm cursor-pointer"
+            >
+              {isVictory ? 'Play Again' : 'Try Again'}
+            </button>
+            <button
+              type="button"
+              onClick={onReturnTitle}
+              className="rounded-lg border border-slate-700 bg-[#141c30] hover:border-slate-500 text-slate-200 px-4 py-2.5 text-sm font-semibold cursor-pointer"
+            >
+              Title
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!activeModal || hud.phase !== 'playing') return null;
+
+  return (
+    <div className="fixed inset-0 z-40 bg-[#050811]/78 flex items-center justify-center p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="w-full max-w-[700px] max-h-[88vh] overflow-y-auto realm-scroll rounded-xl border border-slate-700 bg-[#0c1120] p-5 shadow-2xl"
+      >
+        {/* 1. CRAFTING FORGE (GeminIsland + ShadowRealm + Infinity Core) */}
+        {activeModal === 'craft' && (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display text-lg font-bold text-amber-300">Crafting Forge &amp; Inventory</h2>
+              <button
+                type="button"
+                aria-label="Close Crafting Forge"
+                onClick={onCloseModal}
+                className="rounded border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:text-white cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+            <div className="rounded-lg border border-slate-800 bg-[#111829] px-3.5 py-2.5 mb-4 flex flex-wrap gap-4 text-xs font-mono-tabular text-slate-200">
+              <span>Sticks: {hud.inventory.sticks}</span>
+              <span>Stones: {hud.inventory.stones}</span>
+              <span>Apples: {hud.inventory.apples}</span>
+              <span>Crystals: {hud.inventory.crystals}</span>
+              <span>Fish: {hud.inventory.fish}</span>
+              <span className="text-amber-300">Weapon Tier: {hud.inventory.weaponTier}</span>
+            </div>
+            <div className="space-y-2.5">
+              {[
+                {
+                  key: 'weapon' as const,
+                  title: 'Mythic Weapon Upgrade (+12 ATK)',
+                  cost: '2 Sticks · 2 Stones · 1 Crystal',
+                  cta: 'Forge Upgrade',
+                },
+                {
+                  key: 'campfire' as const,
+                  title: 'Deploy Portable Campfire (Full HP/MP Rest)',
+                  cost: '2 Sticks · 1 Stone',
+                  cta: 'Build Campfire',
+                },
+                {
+                  key: 'feast' as const,
+                  title: 'Apple-Fish Feast (+85 HP Instant)',
+                  cost: '1 Apple or 1 Fish',
+                  cta: 'Cook Feast',
+                },
+                {
+                  key: 'core' as const,
+                  title: 'Charge Infinity Core (Realm Tier +1, +150 XP)',
+                  cost: '2 Crystals',
+                  cta: 'Charge Core',
+                },
+              ].map((item) => (
+                <div
+                  key={item.key}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-[#12192c] px-3.5 py-2.5"
+                >
+                  <div>
+                    <div className="text-sm font-semibold text-slate-100">{item.title}</div>
+                    <div className="text-xs text-slate-400">{item.cost}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => engine?.craft(item.key)}
+                    className="rounded-md bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold px-3.5 py-1.5 text-xs whitespace-nowrap cursor-pointer"
+                  >
+                    {item.cta}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 2. ASCENDANT SKILL TREE (ShadowRealm v3.0) */}
+        {activeModal === 'skills' && (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display text-lg font-bold text-amber-300">Ascendant Skill Tree</h2>
+              <button
+                type="button"
+                aria-label="Close Skill Tree"
+                onClick={onCloseModal}
+                className="rounded border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:text-white cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+            <p className="text-xs text-slate-300 mb-3 font-mono-tabular">
+              Available Skill Points: <strong className="text-amber-300 text-sm">{hud.skillPoints}</strong>
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {(
+                [
+                  { key: 'power', label: 'Ascendant Power', desc: '+6 Base Attack Damage per rank' },
+                  { key: 'vitality', label: 'Iron Vitality', desc: '+24 Max HP and immediate heal per rank' },
+                  { key: 'haste', label: 'Shadow Haste', desc: '+8% Move Speed & faster attack cadence' },
+                  { key: 'arcana', label: 'Void Arcana', desc: '+18 Max MP & +1.1 MP/s regeneration' },
+                ] as const
+              ).map((sk) => (
+                <div
+                  key={sk.key}
+                  className="rounded-lg border border-slate-800 bg-[#12192c] p-3 flex flex-col justify-between gap-2"
+                >
+                  <div>
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-sm font-semibold text-slate-100">{sk.label}</span>
+                      <span className="font-mono-tabular text-xs text-amber-300">Rank {hud.skills[sk.key]}</span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">{sk.desc}</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={hud.skillPoints <= 0}
+                    onClick={() => engine?.upgradeSkill(sk.key)}
+                    className="rounded-md bg-amber-600 disabled:bg-slate-800 disabled:text-slate-500 hover:bg-amber-500 text-slate-950 font-bold py-1.5 text-xs cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    Upgrade {sk.label}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 3. L.E.O. AI COMPANION (Tri-Core Assistant + Server-Side /api/leo) */}
+        {activeModal === 'leo' && (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display text-lg font-bold text-sky-300">L.E.O. Neural Companion</h2>
+              <button
+                type="button"
+                aria-label="Close L.E.O. Companion"
+                onClick={onCloseModal}
+                className="rounded border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:text-white cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+            <div className="h-[190px] overflow-y-auto realm-scroll rounded-lg border border-slate-800 bg-[#080c17] p-3 text-xs space-y-2 mb-3 select-text">
+              {leoMessages.map((m, idx) => (
+                <div key={idx} className={m.sender.startsWith('L.E.O.') ? 'text-sky-200' : 'text-slate-200'}>
+                  <strong className="text-amber-300">[{m.sender}]</strong> {m.text}
+                </div>
+              ))}
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void handleAskLeo();
+              }}
+              className="flex gap-2 mb-3"
+            >
+              <input
+                type="text"
+                aria-label="Ask L.E.O. a question"
+                value={leoInput}
+                onChange={(e) => setLeoInput(e.target.value)}
+                placeholder="Ask L.E.O. about bosses, dungeons, buggy, crafting, or strategy..."
+                className="flex-1 rounded-lg border border-slate-700 bg-[#111829] px-3 py-2 text-xs text-slate-100 focus:border-sky-400 focus:outline-none select-text"
+              />
+              <button
+                type="submit"
+                disabled={leoBusy}
+                className="rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-4 py-2 text-xs cursor-pointer disabled:opacity-60"
+              >
+                {leoBusy ? 'Thinking...' : 'Ask'}
+              </button>
+            </form>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { label: 'Locate Malakor', q: 'where is malakor' },
+                { label: 'Sunken Dungeon', q: 'dungeon' },
+                { label: 'Obsidian Citadel', q: 'castle' },
+                { label: 'XR Cinema', q: 'cinema' },
+                { label: 'LoRA Bio-Lab', q: 'biolab' },
+                { label: 'Rainy Bookstore', q: 'bookstore' },
+              ].map((btn) => (
+                <button
+                  key={btn.label}
+                  type="button"
+                  onClick={() => void handleAskLeo(btn.q)}
+                  className="rounded border border-slate-700 bg-[#12192c] hover:border-sky-400 px-2.5 py-1 text-xs text-slate-200 cursor-pointer"
+                >
+                  {btn.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 4. MEMEFORGE AI SORA STUDIO v2.3.0 (Snapshots, Visualizer, Soundboard, 3D Billboards) */}
+        {activeModal === 'meme' && (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display text-lg font-bold text-fuchsia-300">MemeForge Studio — Billboards &amp; Soundboard</h2>
+              <button
+                type="button"
+                aria-label="Close MemeForge Studio"
+                onClick={onCloseModal}
+                className="rounded border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:text-white cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <canvas
+                  ref={memeCanvasRef}
+                  width={512}
+                  height={320}
+                  className="w-full rounded-lg border border-slate-700 bg-[#080c17]"
+                />
+                <div className="mt-2.5">
+                  <div className="text-[11px] text-slate-400 mb-1">Web Audio Frequency Analyzer</div>
+                  <canvas
+                    ref={vizCanvasRef}
+                    width={320}
+                    height={54}
+                    className="w-full h-[54px] rounded border border-slate-800 bg-[#080c17]"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <div>
+                  <label htmlFor="meme-top" className="block text-[11px] text-slate-400 mb-0.5">
+                    Top Caption
+                  </label>
+                  <input
+                    id="meme-top"
+                    type="text"
+                    value={memeTop}
+                    onChange={(e) => setMemeTop(e.target.value)}
+                    className="w-full rounded border border-slate-700 bg-[#111829] px-2.5 py-1.5 text-xs text-slate-100 select-text"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="meme-bottom" className="block text-[11px] text-slate-400 mb-0.5">
+                    Bottom Caption
+                  </label>
+                  <input
+                    id="meme-bottom"
+                    type="text"
+                    value={memeBottom}
+                    onChange={(e) => setMemeBottom(e.target.value)}
+                    className="w-full rounded border border-slate-700 bg-[#111829] px-2.5 py-1.5 text-xs text-slate-100 select-text"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="meme-filter" className="block text-[11px] text-slate-400 mb-0.5">
+                    Visual Filter
+                  </label>
+                  <select
+                    id="meme-filter"
+                    value={memeFilter}
+                    onChange={(e) => setMemeFilter(e.target.value as 'none' | 'sora' | 'shadow' | 'crt')}
+                    className="w-full rounded border border-slate-700 bg-[#111829] px-2.5 py-1.5 text-xs text-slate-100"
+                  >
+                    <option value="none">Clean Voxel HD</option>
+                    <option value="sora">Sora Neon Cinema</option>
+                    <option value="shadow">ShadowRealm Violet</option>
+                    <option value="crt">Retro RPG Scanlines</option>
+                  </select>
+                </div>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={snapLive3D}
+                    className="flex-1 rounded bg-sky-600 hover:bg-sky-500 text-white py-1.5 text-xs font-semibold cursor-pointer"
+                  >
+                    Snap 3D View
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const pair = AI_MEME_CAPTIONS[Math.floor(Math.random() * AI_MEME_CAPTIONS.length)];
+                      pushMemeCaption(pair[0], pair[1]);
+                      setMemeStatus('Generated new meme caption.');
+                    }}
+                    className="flex-1 rounded bg-violet-600 hover:bg-violet-500 text-white py-1.5 text-xs font-semibold cursor-pointer"
+                  >
+                    Auto Caption
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Undo Caption"
+                    disabled={memeHistIdx <= 0}
+                    onClick={() => {
+                      const idx = Math.max(0, memeHistIdx - 1);
+                      setMemeHistIdx(idx);
+                      setMemeTop(memeHistory[idx].top);
+                      setMemeBottom(memeHistory[idx].bottom);
+                    }}
+                    className="rounded border border-slate-700 px-2.5 text-xs text-slate-200 disabled:opacity-40 cursor-pointer"
+                  >
+                    Undo
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Redo Caption"
+                    disabled={memeHistIdx >= memeHistory.length - 1}
+                    onClick={() => {
+                      const idx = Math.min(memeHistory.length - 1, memeHistIdx + 1);
+                      setMemeHistIdx(idx);
+                      setMemeTop(memeHistory[idx].top);
+                      setMemeBottom(memeHistory[idx].bottom);
+                    }}
+                    className="rounded border border-slate-700 px-2.5 text-xs text-slate-200 disabled:opacity-40 cursor-pointer"
+                  >
+                    Redo
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    drawMemePreview();
+                    if (memeCanvasRef.current && engine) {
+                      engine.projectMemeToBillboards(memeCanvasRef.current);
+                      setMemeStatus('Projected live onto Spawn & Castle 3D Billboards!');
+                    }
+                  }}
+                  className="w-full rounded bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold py-2 text-xs cursor-pointer"
+                >
+                  Project to 3D Castle Billboards
+                </button>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onCloseModal();
+                      engine?.recordFiveSecondClip();
+                    }}
+                    className="flex-1 rounded border border-rose-500/60 bg-rose-950/60 hover:bg-rose-900/70 text-rose-200 py-1.5 text-xs font-semibold cursor-pointer"
+                  >
+                    Record 5s WebM
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      drawMemePreview();
+                      if (!memeCanvasRef.current) return;
+                      const a = document.createElement('a');
+                      a.download = 'ShadowVoxel-MemeForge.png';
+                      a.href = memeCanvasRef.current.toDataURL('image/png');
+                      a.click();
+                    }}
+                    className="flex-1 rounded border border-emerald-500/60 bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-200 py-1.5 text-xs font-semibold cursor-pointer"
+                  >
+                    Save PNG
+                  </button>
+                </div>
+                <div className="rounded-lg border border-slate-800 bg-[#111829] p-2">
+                  <div className="text-[11px] text-slate-400 mb-1.5">Timeline Soundboard</div>
+                  <div className="grid grid-cols-4 gap-1">
+                    {(
+                      [
+                        { label: 'Airhorn', sfx: 'airhorn' },
+                        { label: 'Boom', sfx: 'boom' },
+                        { label: 'Violin', sfx: 'violin' },
+                        { label: 'Fanfare', sfx: 'levelup' },
+                      ] as const
+                    ).map((sb) => (
+                      <button
+                        key={sb.sfx}
+                        type="button"
+                        onClick={() => engine?.playSoundboard(sb.sfx)}
+                        className="rounded border border-slate-700 bg-[#182238] hover:border-amber-400 py-1 text-[11px] text-slate-200 cursor-pointer"
+                      >
+                        {sb.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-[11px] text-sky-300">{memeStatus}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 5. OMNISTREAM XR CINEMA STUDIO */}
+        {activeModal === 'omni' && (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display text-lg font-bold text-sky-300">OmniStream XR 3D Cinema</h2>
+              <button
+                type="button"
+                aria-label="Close OmniStream XR"
+                onClick={onCloseModal}
+                className="rounded border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:text-white cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+            <p className="text-xs text-slate-400 mb-4">
+              Stream procedural cinema channels or load a local MP4/WebM video file onto the curved 3D theater screen overlooking the Ashen Sea.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="rounded-lg border border-slate-800 bg-[#111829] p-3 space-y-2">
+                <div className="text-xs font-semibold text-slate-200">Built-In 3D Channels</div>
+                {(
+                  [
+                    { key: 'cyber', label: 'Ch 1: Nocturne Rainy Bookstore' },
+                    { key: 'warp', label: 'Ch 2: Infinity Core Hyperwarp' },
+                    { key: 'matrix', label: 'Ch 3: Kotlin Ad-Shield Matrix' },
+                  ] as const
+                ).map((ch) => (
+                  <button
+                    key={ch.key}
+                    type="button"
+                    onClick={() => engine?.setCinemaChannel(ch.key)}
+                    className={`w-full text-left rounded border px-3 py-2 text-xs font-medium cursor-pointer ${
+                      hud.cinemaChannel === ch.key
+                        ? 'border-sky-400 bg-sky-950/60 text-sky-200'
+                        : 'border-slate-700 bg-[#161f33] text-slate-200 hover:border-slate-500'
+                    }`}
+                  >
+                    {ch.label}
+                  </button>
+                ))}
+              </div>
+              <div className="rounded-lg border border-slate-800 bg-[#111829] p-3 space-y-2.5">
+                <label htmlFor="local-video-upload" className="block text-xs font-semibold text-slate-200">
+                  Play Local Movie on 3D Screen
+                </label>
+                <input
+                  id="local-video-upload"
+                  type="file"
+                  accept="video/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file && engine) engine.loadLocalCinemaVideo(file);
+                  }}
+                  className="w-full text-xs text-slate-300 file:mr-2 file:rounded file:border-0 file:bg-slate-700 file:px-2.5 file:py-1 file:text-xs file:text-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => engine?.toggleVRMode()}
+                  className="w-full rounded bg-violet-600 hover:bg-violet-500 text-white py-2 text-xs font-semibold cursor-pointer"
+                >
+                  {hud.vrMode ? 'Disable Stereoscopic VR Split' : 'Enable Stereoscopic VR Split (X)'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    engine?.teleportTo('cinema');
+                    onCloseModal();
+                  }}
+                  className="w-full rounded border border-slate-700 bg-[#161f33] hover:border-amber-400 text-slate-100 py-2 text-xs font-semibold cursor-pointer"
+                >
+                  Teleport to XR Cinema Dome
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 6. VIBEPITCH AUDIO & BARD CONSOLE */}
+        {activeModal === 'vibe' && (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display text-lg font-bold text-amber-300">VibePitch Audio &amp; Sonic Bard</h2>
+              <button
+                type="button"
+                aria-label="Close VibePitch Console"
+                onClick={onCloseModal}
+                className="rounded border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:text-white cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+            <div className="rounded-lg border border-slate-800 bg-[#111829] p-4 space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <label htmlFor="vibepitch-slider" className="text-slate-300 font-medium">
+                  Global Real-Time Pitch Shift
+                </label>
+                <span className="font-mono-tabular font-bold text-amber-300">
+                  {hud.pitchSemitones > 0 ? `+${hud.pitchSemitones}` : hud.pitchSemitones} semitones
+                </span>
+              </div>
+              <input
+                id="vibepitch-slider"
+                type="range"
+                min={-12}
+                max={12}
+                step={1}
+                value={hud.pitchSemitones}
+                onChange={(e) => engine?.setVibePitch(Number(e.target.value))}
+                className="w-full accent-amber-500"
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { label: 'Normal (0)', st: 0 },
+                  { label: 'Nightcore (+5)', st: 5 },
+                  { label: 'Shadow Bass (-6)', st: -6 },
+                  { label: 'Celestial (+3)', st: 3 },
+                ].map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => engine?.setVibePitch(preset.st)}
+                    className="rounded border border-slate-700 bg-[#182238] hover:border-amber-400 px-2.5 py-1.5 text-xs text-slate-200 cursor-pointer"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => engine?.triggerSkill(5)}
+                  className="rounded bg-sky-600 hover:bg-sky-500 text-white px-3 py-1.5 text-xs font-semibold cursor-pointer"
+                >
+                  Cast Vibe Pulse
+                </button>
+              </div>
+              <div>
+                <div className="text-xs text-slate-400 mb-1.5">Playable Pitched Bard Keys</div>
+                <div className="grid grid-cols-7 gap-1.5">
+                  {BARD_NOTES.map((note) => (
+                    <button
+                      key={note.label}
+                      type="button"
+                      onClick={() => engine?.playBardNote(note.hz)}
+                      className="rounded border border-slate-500 bg-slate-100 hover:bg-amber-200 active:bg-amber-400 text-slate-950 font-mono-tabular font-bold py-3 text-xs cursor-pointer"
+                    >
+                      {note.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 7. LORAFLOW SPATIAL MLOPS BIOSCIENCE LAB */}
+        {activeModal === 'lora' && (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display text-lg font-bold text-emerald-300">LoRAFlow Spatial Bio-Lab</h2>
+              <button
+                type="button"
+                aria-label="Close LoRAFlow Bio-Lab"
+                onClick={onCloseModal}
+                className="rounded border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:text-white cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+            <p className="text-xs text-slate-400 mb-3">
+              Fine-tune live companion LoRA behavior weights for Lira and L.E.O., or synthesize Bio-Mutagen Serum at the DNA Bio-Reactor.
+            </p>
+            <div className="rounded-lg border border-slate-800 bg-[#111829] p-4 space-y-3">
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <label htmlFor="lora-agg" className="text-slate-200">
+                    Lira Combat Aggression Weight
+                  </label>
+                  <span className="font-mono-tabular text-emerald-300">{hud.lora.aggression.toFixed(1)}</span>
+                </div>
+                <input
+                  id="lora-agg"
+                  type="range"
+                  min={0.2}
+                  max={1.5}
+                  step={0.1}
+                  value={hud.lora.aggression}
+                  onChange={(e) => engine?.updateLoraWeights({ aggression: Number(e.target.value) })}
+                  className="w-full accent-emerald-500"
+                />
+              </div>
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <label htmlFor="lora-heal" className="text-slate-200">
+                    Lira Healing Priority Weight
+                  </label>
+                  <span className="font-mono-tabular text-emerald-300">{hud.lora.healing.toFixed(1)}</span>
+                </div>
+                <input
+                  id="lora-heal"
+                  type="range"
+                  min={0.2}
+                  max={1.5}
+                  step={0.1}
+                  value={hud.lora.healing}
+                  onChange={(e) => engine?.updateLoraWeights({ healing: Number(e.target.value) })}
+                  className="w-full accent-emerald-500"
+                />
+              </div>
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <label htmlFor="lora-mag" className="text-slate-200">
+                    L.E.O. Auto-Gather Magnetism Radius
+                  </label>
+                  <span className="font-mono-tabular text-emerald-300">{hud.lora.magnet}m</span>
+                </div>
+                <input
+                  id="lora-mag"
+                  type="range"
+                  min={3}
+                  max={16}
+                  step={1}
+                  value={hud.lora.magnet}
+                  onChange={(e) => engine?.updateLoraWeights({ magnet: Number(e.target.value) })}
+                  className="w-full accent-emerald-500"
+                />
+              </div>
+              <div className="flex flex-wrap gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => engine?.craft('serum')}
+                  className="flex-1 rounded bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold py-2 px-3 text-xs cursor-pointer"
+                >
+                  Synthesize Bio-Mutagen Serum (1 Crystal)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    engine?.teleportTo('biolab');
+                    onCloseModal();
+                  }}
+                  className="rounded border border-slate-700 bg-[#182238] hover:border-emerald-400 text-slate-100 py-2 px-3 text-xs font-semibold cursor-pointer"
+                >
+                  Teleport to Bio-Lab
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 8. GM / ADMIN COMMAND DESK (2060 BigInt Timebase + Teleports + World Controls) */}
+        {activeModal === 'gm' && (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display text-lg font-bold text-amber-300">GM Command Desk</h2>
+              <button
+                type="button"
+                aria-label="Close GM Command Desk"
+                onClick={onCloseModal}
+                className="rounded border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:text-white cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+            <div className="rounded-lg border border-slate-800 bg-[#080c17] p-3 mb-3 font-mono-tabular text-xs text-sky-300 space-y-1">
+              <div>2060-01-01 128-bit BigInt Offset: {epochClock}</div>
+              <div className="text-slate-400">
+                Active World Entities: {hud.entityCount} · Weather: {hud.weather} · Time: {hud.timeOfDayLabel}
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="rounded-lg border border-slate-800 bg-[#111829] p-3">
+                <div className="text-xs font-semibold text-amber-300 mb-2">Realm Waypoint Teleports</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(
+                    [
+                      { k: 'spawn', l: 'Infinity Core' },
+                      { k: 'blueCastle', l: 'Dawn Citadel' },
+                      { k: 'redCastle', l: 'Obsidian Citadel' },
+                      { k: 'malakor', l: 'Malakor Rift' },
+                      { k: 'dungeon', l: 'Sunken Portal' },
+                      { k: 'cinema', l: 'XR Cinema' },
+                      { k: 'biolab', l: 'LoRA Bio-Lab' },
+                      { k: 'bookstore', l: 'Rainy Bookstore' },
+                      { k: 'sea', l: 'Ashen Sea' },
+                    ] as Array<{ k: LandmarkKey; l: string }>
+                  ).map((tp) => (
+                    <button
+                      key={tp.k}
+                      type="button"
+                      onClick={() => {
+                        engine?.teleportTo(tp.k);
+                        onCloseModal();
+                      }}
+                      className="rounded border border-slate-700 bg-[#182238] hover:border-amber-400 px-2.5 py-1 text-xs text-slate-200 cursor-pointer"
+                    >
+                      {tp.l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-800 bg-[#111829] p-3">
+                <div className="text-xs font-semibold text-fuchsia-300 mb-2">World &amp; Sandbox Actions</div>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => engine?.cycleWeather()}
+                    className="rounded border border-slate-700 bg-[#182238] hover:border-sky-400 px-2.5 py-1 text-xs text-slate-200 cursor-pointer"
+                  >
+                    Cycle Weather
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => engine?.toggleDayNight()}
+                    className="rounded border border-slate-700 bg-[#182238] hover:border-sky-400 px-2.5 py-1 text-xs text-slate-200 cursor-pointer"
+                  >
+                    Toggle Day/Night
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => engine?.grantGmBoost()}
+                    className="rounded border border-slate-700 bg-[#182238] hover:border-amber-400 px-2.5 py-1 text-xs text-slate-200 cursor-pointer"
+                  >
+                    Grant +500G / +180XP
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => engine?.quickSave()}
+                    className="rounded border border-slate-700 bg-[#182238] hover:border-emerald-400 px-2.5 py-1 text-xs text-slate-200 cursor-pointer"
+                  >
+                    Quick Save (F5)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => engine?.quickLoad()}
+                    className="rounded border border-slate-700 bg-[#182238] hover:border-emerald-400 px-2.5 py-1 text-xs text-slate-200 cursor-pointer"
+                  >
+                    Quick Load (F9)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onCloseModal();
+                      engine?.triggerTestPopupAd();
+                    }}
+                    className="rounded border border-rose-600/60 bg-rose-950/60 hover:bg-rose-900/70 px-2.5 py-1 text-xs text-rose-200 cursor-pointer"
+                  >
+                    Spawn Test Spam Ad
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};

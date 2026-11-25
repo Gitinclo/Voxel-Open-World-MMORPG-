@@ -1,0 +1,8 @@
+{
+  "name": "ShadowVoxel: Infinity Core",
+  "description": "20-in-1 unified 3D open-world MMORPG combining Castle Warfare, ShadowRealm 3D biomes and bosses, GeminIsland buggy physics and crafting, L.E.O. AI companion, MemeForge Holo-Billboards, OmniStream XR Cinema, VibePitch audio synth, LoRAFlow Bio-Lab, and Ad-Blocker Shield mechanics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
