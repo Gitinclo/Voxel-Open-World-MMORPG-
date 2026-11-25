@@ -1,7 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { ShadowVoxelEngine } from '../game/engine';
-import { compute2060BigIntOffsetNs, resolveOfflineLeoReply } from '../game/rules';
-import type { HudSnapshot, LandmarkKey, SuiteModalKey } from '../game/types';
+import { CULTIVATION_REALMS, REALM_SHARDS, compute2060BigIntOffsetNs, resolveOfflineLeoReply } from '../game/rules';
+import type {
+  CastleSiegeState,
+  GuildRecord,
+  HudSnapshot,
+  LandmarkKey,
+  LeaderboardEntry,
+  SuiteModalKey,
+} from '../game/types';
 
 interface SuiteModalsProps {
   engine: ShadowVoxelEngine | null;
@@ -65,6 +72,139 @@ export const SuiteModals: React.FC<SuiteModalsProps> = ({
 
   // 2060 BigInt Epoch Clock for GM Command Desk
   const [epochClock, setEpochClock] = useState(() => compute2060BigIntOffsetNs());
+
+  // Open-World-MMORPG- Guilds, Cultivation & Leaderboard State
+  const [guildTab, setGuildTab] = useState<'cultivation' | 'guilds' | 'leaderboard'>('cultivation');
+  const [guilds, setGuilds] = useState<GuildRecord[]>([]);
+  const [siege, setSiege] = useState<CastleSiegeState | null>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [newGuildName, setNewGuildName] = useState('');
+  const [newGuildTag, setNewGuildTag] = useState('');
+  const [guildStatus, setGuildStatus] = useState<string | null>(null);
+
+  const fetchRealmSocial = useCallback(async () => {
+    try {
+      const [gRes, lRes] = await Promise.all([
+        fetch(`/api/guilds?shardId=${encodeURIComponent(hud.shardId)}`),
+        fetch('/api/leaderboard/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: hud.playerName,
+            className: hud.className,
+            lineageName: hud.lineageName,
+            guildTag: hud.guildTag,
+            level: hud.level,
+            cultivationTier: hud.cultivationTier,
+            cultivationName: hud.cultivationName,
+            kills: hud.kills,
+            combatPower: hud.combatPower,
+          }),
+        }),
+      ]);
+      if (gRes.ok) {
+        const gData = await gRes.json();
+        setGuilds(Array.isArray(gData.guilds) ? gData.guilds : []);
+        if (gData.siege) setSiege(gData.siege);
+      }
+      if (lRes.ok) {
+        const lData = await lRes.json();
+        setLeaderboard(Array.isArray(lData.leaderboard) ? lData.leaderboard : []);
+      }
+    } catch {
+      // Offline graceful fallback
+    }
+  }, [
+    hud.shardId,
+    hud.playerName,
+    hud.className,
+    hud.lineageName,
+    hud.guildTag,
+    hud.level,
+    hud.cultivationTier,
+    hud.cultivationName,
+    hud.kills,
+    hud.combatPower,
+  ]);
+
+  useEffect(() => {
+    if (activeModal === 'guilds') {
+      void fetchRealmSocial();
+    }
+  }, [activeModal, fetchRealmSocial]);
+
+  const handleJoinGuild = async (guildId: string) => {
+    try {
+      const res = await fetch(`/api/guilds/${encodeURIComponent(guildId)}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ memberName: hud.playerName }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.guild) {
+        engine?.setGuildMembership(data.guild.id, data.guild.tag);
+        setGuildStatus(`Sworn allegiance to [${data.guild.tag}] ${data.guild.name}!`);
+      }
+      if (Array.isArray(data.guilds)) setGuilds(data.guilds);
+    } catch {
+      setGuildStatus('Could not reach guild server.');
+    }
+  };
+
+  const handleCreateGuild = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newGuildName.trim() || !newGuildTag.trim()) return;
+    try {
+      const res = await fetch('/api/guilds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newGuildName.trim(),
+          tag: newGuildTag.trim(),
+          founderName: hud.playerName,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setGuildStatus(data.error || 'Could not found guild.');
+        return;
+      }
+      setNewGuildName('');
+      setNewGuildTag('');
+      if (data.guild) {
+        engine?.setGuildMembership(data.guild.id, data.guild.tag);
+        setGuildStatus(`Founded [${data.guild.tag}] ${data.guild.name}!`);
+      }
+      if (Array.isArray(data.guilds)) setGuilds(data.guilds);
+    } catch {
+      setGuildStatus('Could not reach guild server.');
+    }
+  };
+
+  const handleLaunchSiegeRally = async () => {
+    try {
+      const res = await fetch('/api/siege/rally', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shardId: hud.shardId,
+          guildId: hud.guildId,
+          combatPower: hud.combatPower,
+        }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.siege) setSiege(data.siege);
+      setGuildStatus(
+        data.captured
+          ? `FORTRESS CAPTURED! ${data.siege.controllingGuildName} now rules ${data.siege.fortressName}!`
+          : `Siege Rally struck the keep gate for ${data.damageDealt} siege damage!`,
+      );
+    } catch {
+      setGuildStatus('Siege rally server unreachable.');
+    }
+  };
 
   useEffect(() => {
     if (activeModal !== 'gm') return;
@@ -1106,6 +1246,263 @@ export const SuiteModals: React.FC<SuiteModalsProps> = ({
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* 9. REALM GUILDS, CULTIVATION BREAKTHROUGH & LEADERBOARD (Open-World-MMORPG-) */}
+        {activeModal === 'guilds' && (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="font-display text-lg font-bold text-amber-300">
+                  Guilds, Cultivation &amp; Shards
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Shard: <span className="text-sky-300 font-semibold">{hud.shardName}</span> · Lineage:{' '}
+                  <span className="text-amber-300 font-semibold">{hud.lineageName}</span> · CP{' '}
+                  <span className="font-mono-tabular text-slate-200">{hud.combatPower}</span>
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close Guilds and Cultivation"
+                onClick={onCloseModal}
+                className="rounded border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:text-white cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div className="flex gap-1.5">
+                {(
+                  [
+                    { k: 'cultivation', label: 'Cultivation' },
+                    { k: 'guilds', label: 'Guilds & Siege' },
+                    { k: 'leaderboard', label: 'Leaderboard' },
+                  ] as const
+                ).map((t) => (
+                  <button
+                    key={t.k}
+                    type="button"
+                    onClick={() => setGuildTab(t.k)}
+                    className={`rounded-md border px-3 py-1.5 text-xs font-semibold cursor-pointer ${
+                      guildTab === t.k
+                        ? 'border-amber-400 bg-amber-500/20 text-amber-200'
+                        : 'border-slate-700 bg-[#111829] text-slate-300 hover:border-slate-500'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1.5 text-xs">
+                <label htmlFor="modal-shard-select" className="text-slate-400">
+                  Shard:
+                </label>
+                <select
+                  id="modal-shard-select"
+                  value={hud.shardId}
+                  onChange={(e) => engine?.setShard(e.target.value)}
+                  className="rounded border border-slate-700 bg-[#111829] px-2 py-1 text-xs text-slate-200"
+                >
+                  {REALM_SHARDS.map((sh) => (
+                    <option key={sh.id} value={sh.id}>
+                      {sh.name} ({sh.region})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {guildStatus && (
+              <div className="mb-3 rounded border border-sky-500/50 bg-[#0b192c] px-3 py-1.5 text-xs text-sky-200">
+                {guildStatus}
+              </div>
+            )}
+
+            {guildTab === 'cultivation' && (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-slate-800 bg-[#111829] p-3 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs text-slate-400">Current Cultivation Realm</div>
+                    <div className="font-display text-base font-bold text-amber-300">{hud.cultivationName}</div>
+                    <div className="text-xs font-mono-tabular text-sky-300 mt-0.5">
+                      Spirit Stones Held: {hud.spiritStones} · Level {hud.level}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const res = engine?.attemptBreakthrough();
+                      if (res) setGuildStatus(res.message);
+                    }}
+                    className="rounded-lg bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold px-4 py-2 text-xs cursor-pointer"
+                  >
+                    Attempt Breakthrough
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {CULTIVATION_REALMS.map((realm) => {
+                    const reached = hud.cultivationTier >= realm.tier;
+                    const isNext = hud.cultivationTier + 1 === realm.tier;
+                    return (
+                      <div
+                        key={realm.tier}
+                        className={`rounded-lg border p-2.5 text-xs ${
+                          reached
+                            ? 'border-emerald-500/60 bg-[#0d1f1b]'
+                            : isNext
+                              ? 'border-amber-500/70 bg-[#1a1829]'
+                              : 'border-slate-800 bg-[#0e1322] opacity-80'
+                        }`}
+                      >
+                        <div className="font-semibold text-slate-100 flex items-center justify-between gap-1">
+                          <span className="truncate">{realm.name}</span>
+                          <span className="font-mono-tabular text-amber-300">{realm.powerMultiplier}x</span>
+                        </div>
+                        <div className="text-[11px] font-mono-tabular text-slate-400 mt-1">
+                          Lv {realm.minLevel} · {realm.spiritStoneCost} Stones
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {guildTab === 'guilds' && (
+              <div className="space-y-3">
+                {siege && (
+                  <div className="rounded-lg border border-amber-500/40 bg-[#151225] p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                      <div>
+                        <div className="font-display text-sm font-bold text-amber-300">{siege.fortressName}</div>
+                        <div className="text-xs text-slate-300">
+                          Controlled by <span className="text-amber-400 font-bold">[{siege.controllingGuildTag}]</span>{' '}
+                          {siege.controllingGuildName} · Rallies: {siege.activeRallies}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleLaunchSiegeRally}
+                        className="rounded bg-rose-600 hover:bg-rose-500 text-white font-bold px-3 py-1.5 text-xs cursor-pointer"
+                      >
+                        Launch Siege Rally
+                      </button>
+                    </div>
+                    <div className="flex justify-between text-[11px] font-mono-tabular text-slate-400 mb-1">
+                      <span>Gate Integrity</span>
+                      <span>
+                        {siege.gateIntegrity} / {siege.maxGateIntegrity}
+                      </span>
+                    </div>
+                    <div className="h-2 rounded bg-slate-900 overflow-hidden">
+                      <div
+                        className="h-full bg-amber-500 transition-all"
+                        style={{ width: `${Math.max(0, (siege.gateIntegrity / siege.maxGateIntegrity) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {guilds.map((g) => {
+                    const isMember = hud.guildId === g.id;
+                    return (
+                      <div key={g.id} className="rounded-lg border border-slate-800 bg-[#111829] p-2.5 flex flex-col justify-between gap-2">
+                        <div>
+                          <div className="font-display text-xs font-bold text-slate-100">
+                            <span className="text-amber-400 mr-1">[{g.tag}]</span>
+                            {g.name}
+                          </div>
+                          <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-2">{g.motto}</p>
+                          <div className="text-[10px] font-mono-tabular text-slate-400 mt-1">
+                            Members {g.members.length} · Power {g.rallyPower}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleJoinGuild(g.id)}
+                          disabled={isMember}
+                          className={`rounded py-1 px-2 text-xs font-semibold cursor-pointer ${
+                            isMember
+                              ? 'bg-emerald-900/60 text-emerald-300 border border-emerald-600/50 cursor-default'
+                              : 'bg-slate-800 hover:bg-amber-600 hover:text-slate-950 text-slate-100'
+                          }`}
+                        >
+                          {isMember ? 'Active Guild' : 'Join Guild'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <form onSubmit={handleCreateGuild} className="flex flex-wrap gap-2 pt-1">
+                  <input
+                    type="text"
+                    aria-label="New guild name"
+                    placeholder="Found Guild Name..."
+                    value={newGuildName}
+                    onChange={(e) => setNewGuildName(e.target.value)}
+                    maxLength={28}
+                    className="flex-1 min-w-[160px] rounded border border-slate-700 bg-[#0d1322] px-2.5 py-1.5 text-xs text-slate-100"
+                  />
+                  <input
+                    type="text"
+                    aria-label="New guild tag"
+                    placeholder="TAG (2-6)"
+                    value={newGuildTag}
+                    onChange={(e) => setNewGuildTag(e.target.value.toUpperCase())}
+                    maxLength={6}
+                    className="w-[100px] rounded border border-slate-700 bg-[#0d1322] px-2.5 py-1.5 text-xs font-mono-tabular text-slate-100"
+                  />
+                  <button
+                    type="submit"
+                    className="rounded bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold px-3 py-1.5 text-xs cursor-pointer"
+                  >
+                    Found Guild
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {guildTab === 'leaderboard' && (
+              <div className="rounded-lg border border-slate-800 bg-[#111829] overflow-hidden">
+                <div className="grid grid-cols-12 gap-2 px-3 py-2 text-[11px] font-semibold text-slate-400 border-b border-slate-800">
+                  <div className="col-span-4">Champion</div>
+                  <div className="col-span-3">Lineage &amp; Class</div>
+                  <div className="col-span-3">Cultivation</div>
+                  <div className="col-span-2 text-right">Power</div>
+                </div>
+                <div className="divide-y divide-slate-800/70 max-h-[250px] overflow-y-auto realm-scroll">
+                  {leaderboard.map((row, idx) => (
+                    <div
+                      key={row.playerId}
+                      className={`grid grid-cols-12 gap-2 px-3 py-2 text-xs items-center ${
+                        row.name === hud.playerName ? 'bg-amber-500/10 text-amber-100' : 'text-slate-200'
+                      }`}
+                    >
+                      <div className="col-span-4 font-semibold truncate">
+                        <span className="font-mono-tabular text-slate-500 mr-1.5">#{idx + 1}</span>
+                        {row.guildTag && <span className="text-amber-400 mr-1">[{row.guildTag}]</span>}
+                        {row.name}
+                      </div>
+                      <div className="col-span-3 text-[11px] text-slate-400 truncate">
+                        {row.lineageName} · {row.className}
+                      </div>
+                      <div className="col-span-3 text-[11px] text-sky-300 truncate">
+                        Lv {row.level} · {row.cultivationName}
+                      </div>
+                      <div className="col-span-2 text-right font-mono-tabular font-bold text-amber-300">
+                        {row.combatPower}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

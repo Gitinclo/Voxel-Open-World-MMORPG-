@@ -2,6 +2,14 @@ export type GamePhase = 'title' | 'playing' | 'paused' | 'gameover';
 
 export type HeroClassKey = 'shadowblade' | 'pyromancer' | 'ironwarden' | 'voidwalker';
 
+export type LineageId =
+  | 'human'
+  | 'sylvan_elf'
+  | 'ironforge_dwarf'
+  | 'azure_dragonkin'
+  | 'celestial_kitsune'
+  | 'void_walker';
+
 export type WeatherMode = 'Clear' | 'Rain' | 'Snow' | 'Ashstorm' | 'Thunderstorm';
 
 export type CinemaChannel = 'cyber' | 'warp' | 'matrix';
@@ -10,6 +18,7 @@ export type SuiteModalKey =
   | null
   | 'craft'
   | 'skills'
+  | 'guilds'
   | 'leo'
   | 'meme'
   | 'omni'
@@ -43,6 +52,76 @@ export interface HeroClassSpec {
   bodyColor: number;
   accentColor: number;
   weapon: 'blade' | 'staff' | 'hammer' | 'voidorb';
+}
+
+export interface LineageSpec {
+  id: LineageId;
+  name: string;
+  origin: string;
+  passiveSummary: string;
+  hpBonusPct: number;
+  attackBonusPct: number;
+  defenseBonusPct: number;
+  manaBonusPct: number;
+  cultivationSpeedPct: number;
+  scale: [number, number, number];
+  accentColor: number;
+  skinColor: number;
+  trait: 'crest' | 'ears' | 'beard' | 'horns' | 'tails' | 'crystals';
+}
+
+export interface CultivationRealmSpec {
+  tier: number;
+  name: string;
+  minLevel: number;
+  spiritStoneCost: number;
+  powerMultiplier: number;
+  auraHex: string;
+  auraColor: number;
+}
+
+export interface RealmShardSpec {
+  id: string;
+  name: string;
+  region: string;
+  biomeTheme: string;
+  maxCapacity: number;
+}
+
+export interface GuildRecord {
+  id: string;
+  name: string;
+  tag: string;
+  emblemColor: string;
+  motto: string;
+  fortressSector: string;
+  treasuryGold: number;
+  rallyPower: number;
+  members: string[];
+}
+
+export interface CastleSiegeState {
+  fortressName: string;
+  controllingGuildTag: string;
+  controllingGuildName: string;
+  gateIntegrity: number;
+  maxGateIntegrity: number;
+  activeRallies: number;
+  totalSiegeDamage: number;
+  lastCapturedBy: string;
+}
+
+export interface LeaderboardEntry {
+  playerId: string;
+  name: string;
+  className: string;
+  lineageName: string;
+  guildTag: string | null;
+  level: number;
+  cultivationTier: number;
+  cultivationName: string;
+  kills: number;
+  combatPower: number;
 }
 
 export interface InventoryState {
@@ -114,6 +193,16 @@ export interface HudSnapshot {
   playerName: string;
   classKey: HeroClassKey;
   className: string;
+  lineageId: LineageId;
+  lineageName: string;
+  shardId: string;
+  shardName: string;
+  guildId: string | null;
+  guildTag: string | null;
+  cultivationTier: number;
+  cultivationName: string;
+  spiritStones: number;
+  combatPower: number;
   level: number;
   hp: number;
   maxHp: number;
@@ -164,6 +253,12 @@ export interface SavePayload {
   savedAt: string;
   playerName: string;
   classKey: HeroClassKey;
+  lineageId?: LineageId;
+  shardId?: string;
+  cultivationTier?: number;
+  spiritStones?: number;
+  guildId?: string | null;
+  guildTag?: string | null;
   level: number;
   xp: number;
   xpNext: number;

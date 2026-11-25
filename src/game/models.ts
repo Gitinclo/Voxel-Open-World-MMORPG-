@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { LINEAGES } from './rules';
+import type { LineageId } from './types';
 
 // Shared contact shadow texture & disc so every actor/vehicle/pickup sits grounded
 let _contactShadowTex: THREE.CanvasTexture | null = null;
@@ -100,9 +102,11 @@ export function createHumanoidRig(
   scale = 1,
   weaponType: 'blade' | 'staff' | 'hammer' | 'voidorb' = 'blade',
   hornedBoss = false,
+  lineageId?: LineageId,
 ): HumanoidRig {
   const group = new THREE.Group();
   const hitMeshes: THREE.Mesh[] = [];
+  const lineage = lineageId ? LINEAGES[lineageId] : null;
 
   const bodyMat = new THREE.MeshStandardMaterial({
     color: bodyColor,
@@ -117,7 +121,7 @@ export function createHumanoidRig(
     emissiveIntensity: hornedBoss ? 0.45 : 0.2,
   });
   const skinMat = new THREE.MeshStandardMaterial({
-    color: hornedBoss ? 0x2c163a : 0xf2cfa0,
+    color: hornedBoss ? 0x2c163a : lineage ? lineage.skinColor : 0xf2cfa0,
     roughness: 0.82,
     metalness: 0.04,
   });
@@ -268,9 +272,74 @@ export function createHumanoidRig(
     rightArmPivot.add(ring, orb);
   }
 
+  // Authentic Open-World-MMORPG- Fantasy Lineage 3D Mesh Traits
+  if (lineage && !hornedBoss) {
+    const traitMat = new THREE.MeshStandardMaterial({
+      color: lineage.accentColor,
+      emissive: lineage.accentColor,
+      emissiveIntensity: 0.35,
+      roughness: 0.3,
+      metalness: 0.65,
+    });
+    if (lineage.trait === 'crest') {
+      const crest = new THREE.Mesh(new THREE.OctahedronGeometry(0.18, 0), traitMat);
+      crest.position.set(0, 3.16, 0.08);
+      group.add(crest);
+    } else if (lineage.trait === 'ears') {
+      const earGeo = new THREE.ConeGeometry(0.08, 0.38, 5);
+      const earL = new THREE.Mesh(earGeo, skinMat);
+      earL.position.set(-0.48, 2.62, 0);
+      earL.rotation.z = 1.1;
+      const earR = new THREE.Mesh(earGeo, skinMat);
+      earR.position.set(0.48, 2.62, 0);
+      earR.rotation.z = -1.1;
+      group.add(earL, earR);
+    } else if (lineage.trait === 'beard') {
+      const beard = new THREE.Mesh(
+        new THREE.BoxGeometry(0.56, 0.44, 0.22),
+        new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.88 }),
+      );
+      beard.position.set(0, 2.16, 0.32);
+      group.add(beard);
+    } else if (lineage.trait === 'horns') {
+      const hornGeo = new THREE.ConeGeometry(0.09, 0.56, 6);
+      const hL = new THREE.Mesh(hornGeo, traitMat);
+      hL.position.set(-0.34, 3.12, -0.04);
+      hL.rotation.z = 0.52;
+      const hR = new THREE.Mesh(hornGeo, traitMat);
+      hR.position.set(0.34, 3.12, -0.04);
+      hR.rotation.z = -0.52;
+      group.add(hL, hR);
+    } else if (lineage.trait === 'tails') {
+      const tailGeo = new THREE.ConeGeometry(0.14, 0.95, 6);
+      [-0.38, 0, 0.38].forEach((rotZ, idx) => {
+        const tail = new THREE.Mesh(tailGeo, idx === 1 ? traitMat : skinMat);
+        tail.position.set(rotZ * 0.45, 1.15, -0.55);
+        tail.rotation.x = -0.85;
+        tail.rotation.z = rotZ;
+        group.add(tail);
+      });
+    } else if (lineage.trait === 'crystals') {
+      const shardGeo = new THREE.OctahedronGeometry(0.14, 0);
+      [
+        [-0.78, 2.75, -0.35],
+        [0.78, 2.75, -0.35],
+        [0, 3.28, -0.35],
+      ].forEach(([sx, sy, sz]) => {
+        const shard = new THREE.Mesh(shardGeo, traitMat);
+        shard.position.set(sx, sy, sz);
+        group.add(shard);
+      });
+    }
+  }
+
   group.add(leftLeg, rightLeg, torso, chestPlate, cloak, head, helm, visor, leftArm, pauldronL, rightArmPivot);
   hitMeshes.push(torso, chestPlate, head);
-  group.scale.setScalar(scale);
+  if (lineage && !hornedBoss) {
+    group.scale.set(scale * lineage.scale[0], scale * lineage.scale[1], scale * lineage.scale[2]);
+  } else {
+    group.scale.setScalar(scale);
+  }
 
   return { group, leftLeg, rightLeg, leftArm, rightArmPivot, hitMeshes };
 }

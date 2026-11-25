@@ -9,12 +9,17 @@ import {
   isOnTrail,
 } from './worldMath';
 import {
+  CULTIVATION_REALMS,
   HERO_CLASSES,
   INITIAL_INVENTORY,
+  INITIAL_SKILLS,
+  LINEAGES,
   applyCraftRecipe,
   applyXpGain,
   advanceCastleCapture,
+  attemptCultivationBreakthrough,
   compute2060BigIntOffsetNs,
+  computeHeroPowerStats,
   computePlayerDamage,
   resolveOfflineLeoReply,
   isValidSavePayload,
@@ -146,4 +151,55 @@ test('2060 BigInt clock, L.E.O. offline command routing, and save validation wor
     }),
     true,
   );
+});
+
+test('all 6 Fantasy Lineages scale HP, MP, ATK, and Combat Power cleanly', () => {
+  assert.equal(Object.keys(LINEAGES).length, 6);
+  const dwarf = computeHeroPowerStats({
+    classKey: 'ironwarden',
+    lineageId: 'ironforge_dwarf',
+    level: 5,
+    cultivationTier: 0,
+    skills: INITIAL_SKILLS,
+    weaponTier: 1,
+    infinityTier: 1,
+  });
+  const kitsune = computeHeroPowerStats({
+    classKey: 'ironwarden',
+    lineageId: 'celestial_kitsune',
+    level: 5,
+    cultivationTier: 0,
+    skills: INITIAL_SKILLS,
+    weaponTier: 1,
+    infinityTier: 1,
+  });
+  assert.ok(dwarf.maxHp > kitsune.maxHp);
+  assert.ok(kitsune.maxMp > dwarf.maxMp);
+
+  const ascended = computeHeroPowerStats({
+    classKey: 'shadowblade',
+    lineageId: 'void_walker',
+    level: 12,
+    cultivationTier: 5,
+    skills: INITIAL_SKILLS,
+    weaponTier: 2,
+    infinityTier: 2,
+  });
+  assert.equal(ascended.cultivationMult, CULTIVATION_REALMS[5].powerMultiplier);
+  assert.ok(ascended.combatPower > dwarf.combatPower * 2);
+});
+
+test('Cultivation Breakthrough enforces level and Spirit Stone requirements', () => {
+  const tooLow = attemptCultivationBreakthrough({ level: 1, cultivationTier: 0, spiritStones: 50 });
+  assert.equal(tooLow.ok, false);
+  assert.equal(tooLow.nextTier, 0);
+
+  const notEnoughStones = attemptCultivationBreakthrough({ level: 3, cultivationTier: 0, spiritStones: 10 });
+  assert.equal(notEnoughStones.ok, false);
+
+  const breakthrough = attemptCultivationBreakthrough({ level: 2, cultivationTier: 0, spiritStones: 45 });
+  assert.equal(breakthrough.ok, true);
+  assert.equal(breakthrough.nextTier, 1);
+  assert.equal(breakthrough.spiritStones, 15);
+  assert.equal(breakthrough.realmName, 'Qi Condensation');
 });

@@ -74,8 +74,272 @@ async function startServer() {
     }
   });
 
+  // =========================================================================
+  // Open-World-MMORPG- (ShadowRealms: Voxel Ascendant) Realm Guilds, Shards,
+  // Castle Siege Rallies & Hall of Champions Leaderboard REST APIs
+  // =========================================================================
+  interface ServerGuild {
+    id: string;
+    name: string;
+    tag: string;
+    emblemColor: string;
+    motto: string;
+    fortressSector: string;
+    treasuryGold: number;
+    rallyPower: number;
+    members: string[];
+  }
+  interface ServerSiege {
+    fortressName: string;
+    controllingGuildTag: string;
+    controllingGuildName: string;
+    gateIntegrity: number;
+    maxGateIntegrity: number;
+    activeRallies: number;
+    totalSiegeDamage: number;
+    lastCapturedBy: string;
+  }
+  interface ServerLeader {
+    playerId: string;
+    name: string;
+    className: string;
+    lineageName: string;
+    guildTag: string | null;
+    level: number;
+    cultivationTier: number;
+    cultivationName: string;
+    kills: number;
+    combatPower: number;
+  }
+
+  const realmShards = [
+    { id: 'solara-eu', name: 'Solara Citadel', region: 'EU-West', biomeTheme: 'Sunlit Plains & Grand Keep', maxCapacity: 250 },
+    { id: 'verdant-na', name: 'Verdant Spires', region: 'NA-East', biomeTheme: 'Emerald Canopy & Ancient Shrines', maxCapacity: 250 },
+    { id: 'ironforge-ap', name: 'Ironforge Bastion', region: 'AP-East', biomeTheme: 'Volcanic Crags & Runic Watchtowers', maxCapacity: 250 },
+  ];
+
+  const guildStore = new Map<string, ServerGuild>([
+    [
+      'guild_valor',
+      {
+        id: 'guild_valor',
+        name: 'Sovereign Vanguard',
+        tag: 'VALOR',
+        emblemColor: '#d97706',
+        motto: 'Hold the Solara Gate against the Shadowvale tide.',
+        fortressSector: 'Solara Citadel Keep',
+        treasuryGold: 48500,
+        rallyPower: 14200,
+        members: ['Arthur Pendragon', 'Lyra Shadowshot', 'Garrick Ironbrow'],
+      },
+    ],
+    [
+      'guild_verdant',
+      {
+        id: 'guild_verdant',
+        name: 'Verdant Wardens',
+        tag: 'LEAF',
+        emblemColor: '#10b981',
+        motto: 'Swift volleys from the emerald canopy.',
+        fortressSector: 'Verdant Spires Shrine',
+        treasuryGold: 36200,
+        rallyPower: 11850,
+        members: ['Sylvara Windrunner', 'Theron Mossblade'],
+      },
+    ],
+    [
+      'guild_iron',
+      {
+        id: 'guild_iron',
+        name: 'Ironforge Runesmiths',
+        tag: 'ANVIL',
+        emblemColor: '#3b82f6',
+        motto: 'Tempered in mountain fire and eternal stone.',
+        fortressSector: 'Ironforge Watchtower',
+        treasuryGold: 41900,
+        rallyPower: 12900,
+        members: ['Borin Runehammer', 'Kaelen Stormforge'],
+      },
+    ],
+  ]);
+
+  const siegeByShard = new Map<string, ServerSiege>();
+  for (const sh of realmShards) {
+    siegeByShard.set(sh.id, {
+      fortressName: `${sh.name} Keep`,
+      controllingGuildTag: 'VALOR',
+      controllingGuildName: 'Sovereign Vanguard',
+      gateIntegrity: 8400,
+      maxGateIntegrity: 10000,
+      activeRallies: 1,
+      totalSiegeDamage: 1600,
+      lastCapturedBy: 'Sovereign Vanguard',
+    });
+  }
+
+  const leaderboardStore = new Map<string, ServerLeader>([
+    [
+      'seed_arthur',
+      {
+        playerId: 'seed_arthur',
+        name: 'Arthur Pendragon',
+        className: 'Iron Warden',
+        lineageName: 'Terran Sovereign',
+        guildTag: 'VALOR',
+        level: 14,
+        cultivationTier: 4,
+        cultivationName: 'Nascent Soul',
+        kills: 86,
+        combatPower: 9420,
+      },
+    ],
+    [
+      'seed_lyra',
+      {
+        playerId: 'seed_lyra',
+        name: 'Lyra Shadowshot',
+        className: 'Shadowblade',
+        lineageName: 'Sylvan High-Elf',
+        guildTag: 'LEAF',
+        level: 11,
+        cultivationTier: 3,
+        cultivationName: 'Core Formation',
+        kills: 64,
+        combatPower: 6850,
+      },
+    ],
+    [
+      'seed_kaelen',
+      {
+        playerId: 'seed_kaelen',
+        name: 'Kaelen Stormforge',
+        className: 'Pyromancer',
+        lineageName: 'Azure Dragonkin',
+        guildTag: 'ANVIL',
+        level: 9,
+        cultivationTier: 2,
+        cultivationName: 'Foundation Realm',
+        kills: 41,
+        combatPower: 5120,
+      },
+    ],
+  ]);
+
+  app.get('/api/realms', (_req, res) => {
+    res.json({
+      shards: realmShards.map((s) => ({
+        ...s,
+        online: players.size,
+        siege: siegeByShard.get(s.id),
+      })),
+    });
+  });
+
+  app.get('/api/guilds', (req, res) => {
+    const shardId = typeof req.query.shardId === 'string' && siegeByShard.has(req.query.shardId) ? req.query.shardId : 'solara-eu';
+    res.json({
+      guilds: Array.from(guildStore.values()),
+      siege: siegeByShard.get(shardId),
+    });
+  });
+
+  app.post('/api/guilds', (req, res) => {
+    const rawName = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 28) : '';
+    const rawTag = typeof req.body?.tag === 'string' ? req.body.tag.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) : '';
+    const motto = typeof req.body?.motto === 'string' ? req.body.motto.trim().slice(0, 80) : 'Forged in the Infinity Core.';
+    const founder = typeof req.body?.founderName === 'string' ? req.body.founderName.trim().slice(0, 20) : 'Hero';
+
+    if (rawName.length < 3 || rawTag.length < 2) {
+      res.status(400).json({ error: 'Guild name (min 3 chars) and tag (2-6 chars) are required.' });
+      return;
+    }
+    const id = `guild_${Date.now().toString(36)}`;
+    const record: ServerGuild = {
+      id,
+      name: rawName,
+      tag: rawTag,
+      emblemColor: '#f59e0b',
+      motto,
+      fortressSector: 'Infinity Core Bastion',
+      treasuryGold: 5000,
+      rallyPower: 3200,
+      members: [founder],
+    };
+    guildStore.set(id, record);
+    res.status(201).json({ guild: record, guilds: Array.from(guildStore.values()) });
+  });
+
+  app.post('/api/guilds/:guildId/join', (req, res) => {
+    const guild = guildStore.get(req.params.guildId);
+    if (!guild) {
+      res.status(404).json({ error: 'Guild not found.' });
+      return;
+    }
+    const memberName = typeof req.body?.memberName === 'string' ? req.body.memberName.trim().slice(0, 20) : 'Hero';
+    if (!guild.members.includes(memberName)) {
+      guild.members.push(memberName);
+      guild.rallyPower += 450;
+    }
+    res.json({ guild, guilds: Array.from(guildStore.values()) });
+  });
+
+  app.post('/api/siege/rally', (req, res) => {
+    const shardId = typeof req.body?.shardId === 'string' && siegeByShard.has(req.body.shardId) ? req.body.shardId : 'solara-eu';
+    const guildId = typeof req.body?.guildId === 'string' ? req.body.guildId : '';
+    const combatPower = Math.max(400, Math.min(25000, Number(req.body?.combatPower) || 1200));
+    const guild = guildStore.get(guildId);
+    const siege = siegeByShard.get(shardId)!;
+    const attackerName = guild ? guild.name : 'Free Vanguard';
+    const attackerTag = guild ? guild.tag : 'FREE';
+
+    const dmg = Math.round(900 + combatPower * 0.25);
+    siege.activeRallies += 1;
+    siege.totalSiegeDamage += dmg;
+    siege.gateIntegrity = Math.max(0, siege.gateIntegrity - dmg);
+
+    let captured = false;
+    if (siege.gateIntegrity <= 0) {
+      captured = true;
+      siege.controllingGuildTag = attackerTag;
+      siege.controllingGuildName = attackerName;
+      siege.lastCapturedBy = attackerName;
+      siege.gateIntegrity = siege.maxGateIntegrity;
+      if (guild) guild.treasuryGold += 2500;
+    }
+
+    res.json({ siege, damageDealt: dmg, captured });
+  });
+
+  app.get('/api/leaderboard', (_req, res) => {
+    const entries = Array.from(leaderboardStore.values()).sort((a, b) => b.combatPower - a.combatPower).slice(0, 12);
+    res.json({ leaderboard: entries });
+  });
+
+  app.post('/api/leaderboard/sync', (req, res) => {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 20) : '';
+    if (!name) {
+      res.status(400).json({ error: 'Player name required.' });
+      return;
+    }
+    const key = `live_${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+    leaderboardStore.set(key, {
+      playerId: key,
+      name,
+      className: String(req.body?.className || 'Shadowblade').slice(0, 20),
+      lineageName: String(req.body?.lineageName || 'Terran Sovereign').slice(0, 24),
+      guildTag: typeof req.body?.guildTag === 'string' ? req.body.guildTag.slice(0, 6) : null,
+      level: Math.max(1, Number(req.body?.level) || 1),
+      cultivationTier: Math.max(0, Math.min(5, Number(req.body?.cultivationTier) || 0)),
+      cultivationName: String(req.body?.cultivationName || 'Mortal Initiate').slice(0, 24),
+      kills: Math.max(0, Number(req.body?.kills) || 0),
+      combatPower: Math.max(100, Number(req.body?.combatPower) || 500),
+    });
+    const entries = Array.from(leaderboardStore.values()).sort((a, b) => b.combatPower - a.combatPower).slice(0, 12);
+    res.json({ leaderboard: entries });
+  });
+
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, players: players.size });
+    res.json({ ok: true, players: players.size, guilds: guildStore.size });
   });
 
   // Mount Vite middleware in dev, or serve dist/ in production

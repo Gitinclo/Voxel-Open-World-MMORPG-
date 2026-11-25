@@ -106,6 +106,7 @@ const SKILL_SLOTS: Array<{
 const SUITE_ITEMS: Array<{ key: Exclude<SuiteModalKey, null>; label: string; hotkey: string }> = [
   { key: 'craft', label: 'Forge', hotkey: 'C' },
   { key: 'skills', label: 'Skills', hotkey: 'K' },
+  { key: 'guilds', label: 'Guilds', hotkey: 'U' },
   { key: 'leo', label: 'L.E.O.', hotkey: 'L' },
   { key: 'meme', label: 'MemeForge', hotkey: 'M' },
   { key: 'omni', label: 'XR Cinema', hotkey: 'O' },
@@ -276,17 +277,24 @@ export const GameHud: React.FC<GameHudProps> = ({
       {/* TOP-LEFT: Compact Hero Vitals Cluster */}
       <section
         aria-label="Hero vitals"
-        className="absolute top-3 left-3 w-[238px] rounded-lg border border-amber-500/30 bg-[#090d18]/88 px-3 py-2.5 pointer-events-auto"
+        className="absolute top-3 left-3 w-[256px] rounded-lg border border-amber-500/30 bg-[#090d18]/88 px-3 py-2.5 pointer-events-auto"
       >
-        <div className="flex items-baseline justify-between gap-2 mb-1.5">
-          <div className="min-w-0">
-            <div className="font-display text-sm font-bold text-slate-50 truncate">{hud.playerName}</div>
-            <div className="text-[11px] text-slate-400">
-              {hud.className} · Lv <span className="font-mono-tabular text-amber-400 font-bold">{hud.level}</span>
+        <div className="mb-1.5">
+          <div className="flex items-baseline justify-between gap-2">
+            <div className="font-display text-sm font-bold text-slate-50 truncate">
+              {hud.guildTag && <span className="text-amber-400 mr-1">[{hud.guildTag}]</span>}
+              {hud.playerName}
+            </div>
+            <div className="text-[11px] font-mono-tabular text-slate-300 whitespace-nowrap shrink-0">
+              {hud.wsConnected ? `Online ${hud.onlineCount}` : 'Solo'}
             </div>
           </div>
-          <div className="text-[11px] font-mono-tabular text-slate-300 whitespace-nowrap">
-            {hud.wsConnected ? `Online ${hud.onlineCount}` : 'Solo'}
+          <div className="text-[11px] text-slate-400 truncate">
+            {hud.lineageName} {hud.className} · Lv <span className="font-mono-tabular text-amber-400 font-bold">{hud.level}</span>
+          </div>
+          <div className="text-[10px] font-mono-tabular text-sky-300/90 flex items-center justify-between gap-2">
+            <span className="truncate">{hud.cultivationName}</span>
+            <span className="whitespace-nowrap text-amber-300">CP {hud.combatPower}</span>
           </div>
         </div>
 
@@ -335,9 +343,9 @@ export const GameHud: React.FC<GameHudProps> = ({
         <div className="flex items-center justify-between text-[11px] font-mono-tabular text-slate-300 pt-1 border-t border-slate-800/90">
           <span>Gold {hud.gold}</span>
           <span aria-hidden="true">·</span>
-          <span>Ads {hud.adsBlocked}</span>
+          <span>Stones {hud.spiritStones}</span>
           <span aria-hidden="true">·</span>
-          <span>Core T{hud.infinityTier}</span>
+          <span>Ads {hud.adsBlocked}</span>
         </div>
       </section>
 

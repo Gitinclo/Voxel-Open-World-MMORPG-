@@ -3,12 +3,22 @@ import { GameHud } from './components/GameHud';
 import { SuiteModals } from './components/SuiteModals';
 import { TitleScreen } from './components/TitleScreen';
 import { ShadowVoxelEngine } from './game/engine';
-import { HERO_CLASSES, INITIAL_INVENTORY, INITIAL_LORA, INITIAL_QUESTS, INITIAL_SKILLS } from './game/rules';
+import {
+  CULTIVATION_REALMS,
+  HERO_CLASSES,
+  INITIAL_INVENTORY,
+  INITIAL_LORA,
+  INITIAL_QUESTS,
+  INITIAL_SKILLS,
+  LINEAGES,
+  REALM_SHARDS,
+} from './game/rules';
 import type {
   ChatMessage,
   FloatingLabel,
   HeroClassKey,
   HudSnapshot,
+  LineageId,
   PopupAdItem,
   SuiteModalKey,
 } from './game/types';
@@ -19,6 +29,16 @@ const INITIAL_HUD: HudSnapshot = {
   playerName: 'GitincloHero',
   classKey: 'shadowblade',
   className: HERO_CLASSES.shadowblade.name,
+  lineageId: 'human',
+  lineageName: LINEAGES.human.name,
+  shardId: REALM_SHARDS[0].id,
+  shardName: REALM_SHARDS[0].name,
+  guildId: null,
+  guildTag: null,
+  cultivationTier: 0,
+  cultivationName: CULTIVATION_REALMS[0].name,
+  spiritStones: 35,
+  combatPower: 1120,
   level: 1,
   hp: HERO_CLASSES.shadowblade.hp,
   maxHp: HERO_CLASSES.shadowblade.hp,
@@ -70,8 +90,12 @@ export default function App() {
 
   const [playerName, setPlayerName] = useState('GitincloHero');
   const [selectedClass, setSelectedClass] = useState<HeroClassKey>('shadowblade');
+  const [selectedLineage, setSelectedLineage] = useState<LineageId>('human');
+  const [selectedShard, setSelectedShard] = useState<string>(REALM_SHARDS[0].id);
   const playerNameRef = useRef('GitincloHero');
   const selectedClassRef = useRef<HeroClassKey>('shadowblade');
+  const selectedLineageRef = useRef<LineageId>('human');
+  const selectedShardRef = useRef<string>(REALM_SHARDS[0].id);
   const [hud, setHud] = useState<HudSnapshot>(INITIAL_HUD);
   const [activeModal, setActiveModal] = useState<SuiteModalKey>(null);
   const [chatLog, setChatLog] = useState<ChatMessage[]>([]);
@@ -159,6 +183,7 @@ export default function App() {
       const keyMap: Record<string, SuiteModalKey> = {
         KeyC: 'craft',
         KeyK: 'skills',
+        KeyU: 'guilds',
         KeyL: 'leo',
         KeyM: 'meme',
         KeyO: 'omni',
@@ -187,9 +212,24 @@ export default function App() {
     setSelectedClass(cls);
   };
 
+  const handleSelectLineage = (lin: LineageId) => {
+    selectedLineageRef.current = lin;
+    setSelectedLineage(lin);
+  };
+
+  const handleSelectShard = (shardId: string) => {
+    selectedShardRef.current = shardId;
+    setSelectedShard(shardId);
+  };
+
   const handleStart = () => {
     setActiveModal(null);
-    engineRef.current?.startGame(playerNameRef.current, selectedClassRef.current);
+    engineRef.current?.startGame(
+      playerNameRef.current,
+      selectedClassRef.current,
+      selectedLineageRef.current,
+      selectedShardRef.current,
+    );
   };
 
   return (
@@ -201,8 +241,12 @@ export default function App() {
         <TitleScreen
           playerName={playerName}
           selectedClass={selectedClass}
+          selectedLineage={selectedLineage}
+          selectedShard={selectedShard}
           onNameChange={handleNameChange}
           onSelectClass={handleSelectClass}
+          onSelectLineage={handleSelectLineage}
+          onSelectShard={handleSelectShard}
           onStart={handleStart}
         />
       )}

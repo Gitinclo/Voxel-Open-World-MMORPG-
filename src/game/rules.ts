@@ -1,9 +1,13 @@
 import type {
+  CultivationRealmSpec,
   HeroClassKey,
   HeroClassSpec,
   InventoryState,
+  LineageId,
+  LineageSpec,
   LoraWeights,
   QuestProgress,
+  RealmShardSpec,
   SavePayload,
   SkillLevels,
 } from './types';
@@ -74,6 +78,249 @@ export const HERO_CLASSES: Record<HeroClassKey, HeroClassSpec> = {
     weapon: 'voidorb',
   },
 };
+
+export const LINEAGES: Record<LineageId, LineageSpec> = {
+  human: {
+    id: 'human',
+    name: 'Terran Sovereign',
+    origin: 'Solara Citadel',
+    passiveSummary: '+10% HP · +10% ATK · +12% Spirit',
+    hpBonusPct: 10,
+    attackBonusPct: 10,
+    defenseBonusPct: 10,
+    manaBonusPct: 10,
+    cultivationSpeedPct: 12,
+    scale: [1, 1, 1],
+    accentColor: 0xe0b254,
+    skinColor: 0xe6be98,
+    trait: 'crest',
+  },
+  sylvan_elf: {
+    id: 'sylvan_elf',
+    name: 'Sylvan High-Elf',
+    origin: 'Verdant Spires',
+    passiveSummary: '+18% ATK · +15% MP · Agile',
+    hpBonusPct: 4,
+    attackBonusPct: 18,
+    defenseBonusPct: 4,
+    manaBonusPct: 15,
+    cultivationSpeedPct: 10,
+    scale: [0.94, 1.07, 0.94],
+    accentColor: 0x10b981,
+    skinColor: 0xf0d7bf,
+    trait: 'ears',
+  },
+  ironforge_dwarf: {
+    id: 'ironforge_dwarf',
+    name: 'Ironforge Runesmith',
+    origin: 'Ironforge Bastion',
+    passiveSummary: '+22% HP · +20% DEF · Sturdy',
+    hpBonusPct: 22,
+    attackBonusPct: 8,
+    defenseBonusPct: 20,
+    manaBonusPct: 4,
+    cultivationSpeedPct: 8,
+    scale: [1.14, 0.86, 1.12],
+    accentColor: 0xd97706,
+    skinColor: 0xddb08b,
+    trait: 'beard',
+  },
+  azure_dragonkin: {
+    id: 'azure_dragonkin',
+    name: 'Azure Dragonkin',
+    origin: 'Skyridge Peak',
+    passiveSummary: '+16% HP · +16% ATK · Horns',
+    hpBonusPct: 16,
+    attackBonusPct: 16,
+    defenseBonusPct: 12,
+    manaBonusPct: 10,
+    cultivationSpeedPct: 14,
+    scale: [1.06, 1.08, 1.06],
+    accentColor: 0x0ea5e9,
+    skinColor: 0x8ab4d6,
+    trait: 'horns',
+  },
+  celestial_kitsune: {
+    id: 'celestial_kitsune',
+    name: 'Celestial Kitsune',
+    origin: 'Moonlit Grove',
+    passiveSummary: '+24% MP · +14% ATK · +18% Spirit',
+    hpBonusPct: 6,
+    attackBonusPct: 14,
+    defenseBonusPct: 6,
+    manaBonusPct: 24,
+    cultivationSpeedPct: 18,
+    scale: [0.95, 1.01, 0.95],
+    accentColor: 0xf43f5e,
+    skinColor: 0xf5dfc9,
+    trait: 'tails',
+  },
+  void_walker: {
+    id: 'void_walker',
+    name: 'Void Walker',
+    origin: 'Astral Rift',
+    passiveSummary: '+20% ATK · +20% MP · Shards',
+    hpBonusPct: 8,
+    attackBonusPct: 20,
+    defenseBonusPct: 8,
+    manaBonusPct: 20,
+    cultivationSpeedPct: 16,
+    scale: [0.98, 1.05, 0.98],
+    accentColor: 0x8b5cf6,
+    skinColor: 0x6d7599,
+    trait: 'crystals',
+  },
+};
+
+export const CULTIVATION_REALMS: readonly CultivationRealmSpec[] = [
+  {
+    tier: 0,
+    name: 'Mortal Initiate',
+    minLevel: 1,
+    spiritStoneCost: 0,
+    powerMultiplier: 1.0,
+    auraHex: '#94a3b8',
+    auraColor: 0x94a3b8,
+  },
+  {
+    tier: 1,
+    name: 'Qi Condensation',
+    minLevel: 2,
+    spiritStoneCost: 30,
+    powerMultiplier: 1.25,
+    auraHex: '#38bdf8',
+    auraColor: 0x38bdf8,
+  },
+  {
+    tier: 2,
+    name: 'Foundation Realm',
+    minLevel: 4,
+    spiritStoneCost: 85,
+    powerMultiplier: 1.6,
+    auraHex: '#10b981',
+    auraColor: 0x10b981,
+  },
+  {
+    tier: 3,
+    name: 'Core Formation',
+    minLevel: 6,
+    spiritStoneCost: 180,
+    powerMultiplier: 2.05,
+    auraHex: '#f59e0b',
+    auraColor: 0xf59e0b,
+  },
+  {
+    tier: 4,
+    name: 'Nascent Soul',
+    minLevel: 9,
+    spiritStoneCost: 340,
+    powerMultiplier: 2.65,
+    auraHex: '#a855f7',
+    auraColor: 0xa855f7,
+  },
+  {
+    tier: 5,
+    name: 'Sovereign Ascendant',
+    minLevel: 12,
+    spiritStoneCost: 600,
+    powerMultiplier: 3.4,
+    auraHex: '#facc15',
+    auraColor: 0xfacc15,
+  },
+];
+
+export const REALM_SHARDS: readonly RealmShardSpec[] = [
+  {
+    id: 'solara-eu',
+    name: 'Solara Citadel',
+    region: 'EU-West',
+    biomeTheme: 'Sunlit Plains & Grand Keep',
+    maxCapacity: 250,
+  },
+  {
+    id: 'verdant-na',
+    name: 'Verdant Spires',
+    region: 'NA-East',
+    biomeTheme: 'Emerald Canopy & Ancient Shrines',
+    maxCapacity: 250,
+  },
+  {
+    id: 'ironforge-ap',
+    name: 'Ironforge Bastion',
+    region: 'AP-East',
+    biomeTheme: 'Volcanic Crags & Runic Watchtowers',
+    maxCapacity: 250,
+  },
+];
+
+export function computeHeroPowerStats(params: {
+  classKey: HeroClassKey;
+  lineageId: LineageId;
+  level: number;
+  cultivationTier: number;
+  skills: SkillLevels;
+  weaponTier: number;
+  infinityTier: number;
+}): { maxHp: number; maxMp: number; combatPower: number; cultivationMult: number } {
+  const cls = HERO_CLASSES[params.classKey];
+  const lin = LINEAGES[params.lineageId];
+  const cult = CULTIVATION_REALMS[Math.min(CULTIVATION_REALMS.length - 1, Math.max(0, params.cultivationTier))];
+
+  const rawHp = cls.hp + (params.level - 1) * 24 + params.skills.vitality * 22;
+  const rawMp = cls.mp + (params.level - 1) * 14 + params.skills.arcana * 18;
+  const maxHp = Math.round(rawHp * (1 + lin.hpBonusPct / 100) * (0.85 + cult.powerMultiplier * 0.15));
+  const maxMp = Math.round(rawMp * (1 + lin.manaBonusPct / 100) * (0.85 + cult.powerMultiplier * 0.15));
+
+  const atkScore =
+    (cls.damage + (params.weaponTier - 1) * 12 + params.skills.power * 6) *
+    (1 + lin.attackBonusPct / 100) *
+    (1 + (params.infinityTier - 1) * 0.15) *
+    cult.powerMultiplier;
+
+  const combatPower = Math.round(maxHp * 1.4 + maxMp * 1.1 + atkScore * 22 + params.level * 120);
+  return { maxHp, maxMp, combatPower, cultivationMult: cult.powerMultiplier };
+}
+
+export function attemptCultivationBreakthrough(state: {
+  level: number;
+  cultivationTier: number;
+  spiritStones: number;
+}): { ok: boolean; nextTier: number; spiritStones: number; realmName: string; reason?: string } {
+  const nextSpec = CULTIVATION_REALMS[state.cultivationTier + 1];
+  if (!nextSpec) {
+    return {
+      ok: false,
+      nextTier: state.cultivationTier,
+      spiritStones: state.spiritStones,
+      realmName: CULTIVATION_REALMS[state.cultivationTier].name,
+      reason: 'Already attained Sovereign Ascendant peak realm.',
+    };
+  }
+  if (state.level < nextSpec.minLevel) {
+    return {
+      ok: false,
+      nextTier: state.cultivationTier,
+      spiritStones: state.spiritStones,
+      realmName: CULTIVATION_REALMS[state.cultivationTier].name,
+      reason: `Requires Level ${nextSpec.minLevel} for ${nextSpec.name}.`,
+    };
+  }
+  if (state.spiritStones < nextSpec.spiritStoneCost) {
+    return {
+      ok: false,
+      nextTier: state.cultivationTier,
+      spiritStones: state.spiritStones,
+      realmName: CULTIVATION_REALMS[state.cultivationTier].name,
+      reason: `Need ${nextSpec.spiritStoneCost} Spirit Stones (${state.spiritStones} held).`,
+    };
+  }
+  return {
+    ok: true,
+    nextTier: nextSpec.tier,
+    spiritStones: state.spiritStones - nextSpec.spiritStoneCost,
+    realmName: nextSpec.name,
+  };
+}
 
 export const INITIAL_INVENTORY: InventoryState = {
   sticks: 4,
@@ -147,6 +394,8 @@ export interface DamageParams {
   ascendantActive: boolean;
   bioSerumActive: boolean;
   critChance: number;
+  lineageAtkBonusPct?: number;
+  cultivationMult?: number;
   roll?: number; // 0..1 deterministic hook for testing
 }
 
@@ -155,6 +404,8 @@ export function computePlayerDamage(params: DamageParams): { damage: number; isC
   const weaponBonus = (params.weaponTier - 1) * 12;
   const skillBonus = params.powerSkill * 6;
   const coreMult = 1 + (params.infinityTier - 1) * 0.15;
+  const lineageMult = 1 + (params.lineageAtkBonusPct ?? 0) / 100;
+  const cultMult = params.cultivationMult ?? 1.0;
   const ascMult = params.ascendantActive ? 1.75 : 1.0;
   const bioMult = params.bioSerumActive ? 1.35 : 1.0;
 
@@ -163,7 +414,14 @@ export function computePlayerDamage(params: DamageParams): { damage: number; isC
   const critMult = isCrit ? 1.65 : 1.0;
 
   const total = Math.round(
-    (params.baseDamage + weaponBonus + skillBonus) * levelMult * coreMult * ascMult * bioMult * critMult,
+    (params.baseDamage + weaponBonus + skillBonus) *
+      levelMult *
+      coreMult *
+      lineageMult *
+      cultMult *
+      ascMult *
+      bioMult *
+      critMult,
   );
   return { damage: Math.max(1, total), isCrit };
 }

@@ -16,14 +16,19 @@ import {
   type HumanoidRig,
 } from './models';
 import {
+  CULTIVATION_REALMS,
   HERO_CLASSES,
   INITIAL_INVENTORY,
   INITIAL_LORA,
   INITIAL_QUESTS,
   INITIAL_SKILLS,
+  LINEAGES,
+  REALM_SHARDS,
   advanceCastleCapture,
   applyCraftRecipe,
   applyXpGain,
+  attemptCultivationBreakthrough,
+  computeHeroPowerStats,
   computePlayerDamage,
   isValidSavePayload,
   type CraftRecipeKey,
@@ -37,6 +42,7 @@ import type {
   HudSnapshot,
   InventoryState,
   LandmarkKey,
+  LineageId,
   LoraWeights,
   MinimapBlip,
   PopupAdItem,
@@ -64,7 +70,7 @@ export interface EngineCallbacks {
   onPopupAd: (ad: PopupAdItem) => void;
   onClearPopups: () => void;
   onFloatLabel: (label: FloatingLabel) => void;
-  onOpenModal?: (modal: 'craft' | 'skills' | 'leo' | 'meme' | 'omni' | 'vibe' | 'lora' | 'gm') => void;
+  onOpenModal?: (modal: 'craft' | 'skills' | 'guilds' | 'leo' | 'meme' | 'omni' | 'vibe' | 'lora' | 'gm') => void;
 }
 
 interface EnemyEntity {
@@ -231,6 +237,12 @@ export class ShadowVoxelEngine {
   private outcome: 'victory' | 'defeat' | null = null;
   private playerName = 'GitincloHero';
   private classKey: HeroClassKey = 'shadowblade';
+  private lineageId: LineageId = 'human';
+  private shardId = 'solara-eu';
+  private guildId: string | null = null;
+  private guildTag: string | null = null;
+  private cultivationTier = 0;
+  private spiritStones = 35;
   private level = 1;
   private xp = 0;
   private xpNext = 100;
@@ -252,6 +264,7 @@ export class ShadowVoxelEngine {
   private playerRig!: HumanoidRig;
   private shieldMesh!: THREE.Mesh;
   private ascAuraMesh!: THREE.Mesh;
+  private cultAuraMesh!: THREE.Mesh;
   private px = 0;
   private py = 2.5;
   private pz = 12; // Open plaza south of Infinity Core facing north toward Core & Castles
@@ -1036,6 +1049,16 @@ export class ShadowVoxelEngine {
     this.ascAuraMesh.position.y = 0.45;
     this.ascAuraMesh.visible = false;
     this.playerRig.group.add(this.ascAuraMesh);
+
+    // Cultivation Breakthrough Ground Halo (Open-World-MMORPG-)
+    this.cultAuraMesh = new THREE.Mesh(
+      new THREE.TorusGeometry(1.38, 0.08, 8, 28),
+      new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.78 }),
+    );
+    this.cultAuraMesh.rotation.x = Math.PI / 2;
+    this.cultAuraMesh.position.y = 0.16;
+    this.cultAuraMesh.visible = false;
+    this.playerRig.group.add(this.cultAuraMesh);
     this.scene.add(this.playerRig.group);
 
     // Drivable GeminIsland Off-Road Buggy parked beside Infinity Core Plaza
@@ -1388,38 +1411,112 @@ export class ShadowVoxelEngine {
   // =========================================================================
   // PUBLIC API FOR REACT SHELL & MODALS
   // =========================================================================
-  public startGame(name: string, classKey: HeroClassKey): void {
+  public startGame(
+    name: string,
+    classKey: HeroClassKey,
+    lineageId: LineageId = this.lineageId,
+    shardId: string = this.shardId,
+  ): void {
     this.audio.unlock();
     this.playerName = name.trim() || 'GitincloHero';
     this.classKey = classKey;
+    this.lineageId = lineageId;
+    this.shardId = shardId;
     const spec = HERO_CLASSES[classKey];
+    const lineage = LINEAGES[lineageId];
+    const stats = computeHeroPowerStats({
+      classKey: this.classKey,
+      lineageId: this.lineageId,
+      level: this.level,
+      cultivationTier: this.cultivationTier,
+      skills: this.skills,
+      weaponTier: this.inventory.weaponTier,
+      infinityTier: this.infinityTier,
+    });
 
-    this.maxHp = spec.hp + this.skills.vitality * 22;
+    this.maxHp = stats.maxHp;
     this.hp = this.maxHp;
-    this.maxMp = spec.mp + this.skills.arcana * 18;
+    this.maxMp = stats.maxMp;
     this.mp = this.maxMp;
     this.outcome = null;
     this.phase = 'playing';
     this.keys.clear();
     this.isDraggingCam = false;
 
-    // Rebuild hero mesh to match chosen class
+    // Rebuild hero mesh to match chosen class & fantasy lineage
     this.scene.remove(this.playerRig.group);
-    this.playerRig = createHumanoidRig(spec.bodyColor, spec.accentColor, 1.05, spec.weapon);
+    this.playerRig = createHumanoidRig(spec.bodyColor, spec.accentColor, 1.05, spec.weapon, false, lineageId);
     this.playerRig.group.position.set(this.px, this.py, this.pz);
     this.playerRig.group.rotation.y = this.pRotY;
-    this.playerRig.group.add(this.shieldMesh, this.ascAuraMesh);
+    this.playerRig.group.add(this.shieldMesh, this.ascAuraMesh, this.cultAuraMesh);
     this.scene.add(this.playerRig.group);
+    this.syncCultivationAura();
 
     document.body.dataset.state = 'playing';
     this.connectMultiplayer();
     this.audio.play('levelup');
+    const shardName = REALM_SHARDS.find((s) => s.id === this.shardId)?.name ?? 'Solara Citadel';
     this.cb.onChat({
       id: `c_${this.chatIdSeq++}`,
       sender: 'REALM',
-      text: `Welcome ${this.playerName} (${spec.name})! Explore the 7 biomes, capture Obsidian Citadel, or press [M] for MemeForge.`,
+      text: `Welcome ${this.playerName} (${lineage.name} ${spec.name}) to ${shardName}! Press [U] for Guilds & Cultivation, or [M] for MemeForge.`,
       tone: 'system',
     });
+    this.emitHudSnapshot();
+  }
+
+  private syncCultivationAura(): void {
+    const realm = CULTIVATION_REALMS[Math.min(CULTIVATION_REALMS.length - 1, Math.max(0, this.cultivationTier))];
+    this.cultAuraMesh.visible = this.cultivationTier > 0;
+    const mat = this.cultAuraMesh.material as THREE.MeshBasicMaterial;
+    mat.color.setHex(realm.auraColor);
+  }
+
+  public attemptBreakthrough(): { ok: boolean; message: string } {
+    const res = attemptCultivationBreakthrough({
+      level: this.level,
+      cultivationTier: this.cultivationTier,
+      spiritStones: this.spiritStones,
+    });
+    if (!res.ok) {
+      this.cb.onToast(res.reason || 'Breakthrough requirements not met.');
+      return { ok: false, message: res.reason || 'Breakthrough requirements not met.' };
+    }
+    this.cultivationTier = res.nextTier;
+    this.spiritStones = res.spiritStones;
+    const stats = computeHeroPowerStats({
+      classKey: this.classKey,
+      lineageId: this.lineageId,
+      level: this.level,
+      cultivationTier: this.cultivationTier,
+      skills: this.skills,
+      weaponTier: this.inventory.weaponTier,
+      infinityTier: this.infinityTier,
+    });
+    this.maxHp = stats.maxHp;
+    this.hp = this.maxHp;
+    this.maxMp = stats.maxMp;
+    this.mp = this.maxMp;
+    this.syncCultivationAura();
+    this.audio.play('levelup');
+    this.spawnParticles(this.px, this.py + 1.8, this.pz, CULTIVATION_REALMS[this.cultivationTier].auraColor, 34, 15);
+    const msg = `Cultivation Breakthrough! Ascended to ${res.realmName} (${stats.cultivationMult.toFixed(2)}x Power)`;
+    this.cb.onToast(msg);
+    this.emitHudSnapshot();
+    return { ok: true, message: msg };
+  }
+
+  public setGuildMembership(guildId: string | null, guildTag: string | null): void {
+    this.guildId = guildId;
+    this.guildTag = guildTag;
+    this.emitHudSnapshot();
+  }
+
+  public setShard(shardId: string): void {
+    if (!REALM_SHARDS.some((s) => s.id === shardId)) return;
+    this.shardId = shardId;
+    const name = REALM_SHARDS.find((s) => s.id === shardId)?.name ?? shardId;
+    this.cb.onToast(`Switched Realm Shard to ${name}`);
     this.emitHudSnapshot();
   }
 
@@ -1439,6 +1536,8 @@ export class ShadowVoxelEngine {
     this.xp = 0;
     this.xpNext = 100;
     this.gold = 60;
+    this.cultivationTier = 0;
+    this.spiritStones = 35;
     this.kills = 0;
     this.adsBlocked = 0;
     this.infinityTier = 1;
@@ -1454,7 +1553,7 @@ export class ShadowVoxelEngine {
     this.inBuggy = false;
     this.isFishing = false;
     this.clearPopups();
-    this.startGame(this.playerName, this.classKey);
+    this.startGame(this.playerName, this.classKey, this.lineageId, this.shardId);
   }
 
   public toggleCameraMode(): void {
@@ -1515,8 +1614,9 @@ export class ShadowVoxelEngine {
 
   public grantGmBoost(): void {
     this.gold += 500;
+    this.spiritStones += 50;
     this.gainXp(180);
-    this.cb.onToast('GM Grant: +500 Gold and +180 XP');
+    this.cb.onToast('GM Grant: +500 Gold, +50 Spirit Stones, +180 XP');
     this.emitHudSnapshot();
   }
 
@@ -1740,6 +1840,12 @@ export class ShadowVoxelEngine {
         savedAt: new Date().toISOString(),
         playerName: this.playerName,
         classKey: this.classKey,
+        lineageId: this.lineageId,
+        shardId: this.shardId,
+        cultivationTier: this.cultivationTier,
+        spiritStones: this.spiritStones,
+        guildId: this.guildId,
+        guildTag: this.guildTag,
         level: this.level,
         xp: this.xp,
         xpNext: this.xpNext,
@@ -1781,6 +1887,12 @@ export class ShadowVoxelEngine {
       }
       this.playerName = parsed.playerName;
       this.classKey = parsed.classKey;
+      if (parsed.lineageId && parsed.lineageId in LINEAGES) this.lineageId = parsed.lineageId;
+      if (parsed.shardId) this.shardId = parsed.shardId;
+      if (typeof parsed.cultivationTier === 'number') this.cultivationTier = parsed.cultivationTier;
+      if (typeof parsed.spiritStones === 'number') this.spiritStones = parsed.spiritStones;
+      if (parsed.guildId !== undefined) this.guildId = parsed.guildId;
+      if (parsed.guildTag !== undefined) this.guildTag = parsed.guildTag;
       this.level = parsed.level;
       this.xp = parsed.xp;
       this.xpNext = parsed.xpNext;
@@ -1801,6 +1913,7 @@ export class ShadowVoxelEngine {
       this.pz = parsed.z;
       this.py = getTerrainHeight(this.px, this.pz);
       this.inDungeon = this.pz < -185;
+      this.syncCultivationAura();
       this.audio.play('levelup');
       this.cb.onToast(`Loaded Level ${this.level} ${this.playerName}`);
       this.emitHudSnapshot();
@@ -1952,6 +2065,8 @@ export class ShadowVoxelEngine {
 
   private damageEnemy(e: EnemyEntity, baseDmg: number, isHeavy: boolean, siphon = false): void {
     const spec = HERO_CLASSES[this.classKey];
+    const lineage = LINEAGES[this.lineageId];
+    const cult = CULTIVATION_REALMS[Math.min(CULTIVATION_REALMS.length - 1, Math.max(0, this.cultivationTier))];
     const { damage, isCrit } = computePlayerDamage({
       baseDamage: baseDmg,
       level: this.level,
@@ -1961,6 +2076,8 @@ export class ShadowVoxelEngine {
       ascendantActive: this.ascendantTimer > 0,
       bioSerumActive: this.bioSerumTimer > 0,
       critChance: spec.critChance,
+      lineageAtkBonusPct: lineage.attackBonusPct,
+      cultivationMult: cult.powerMultiplier,
     });
 
     e.hp -= damage;
@@ -1995,6 +2112,8 @@ export class ShadowVoxelEngine {
       e.respawnTimer = e.isBoss ? 40 : 18;
       this.kills += 1;
       this.gold += e.gold;
+      const stoneGain = Math.round((e.isBoss ? 65 : 12) * (1 + lineage.cultivationSpeedPct / 100));
+      this.spiritStones += stoneGain;
       this.hitstopTimer = 0.055;
       this.trauma = Math.min(1, this.trauma + 0.35);
       this.gainXp(e.xp);
@@ -2750,6 +2869,11 @@ export class ShadowVoxelEngine {
     if (this.shieldMesh.visible) this.shieldMesh.rotation.y += dt * 2.4;
     this.ascAuraMesh.visible = this.ascendantTimer > 0;
     if (this.ascAuraMesh.visible) this.ascAuraMesh.rotation.z += dt * 4.0;
+    if (this.cultAuraMesh.visible) {
+      this.cultAuraMesh.rotation.z -= dt * 1.6;
+      const pulse = 1 + Math.sin(this.elapsedSec * 3.2) * 0.06;
+      this.cultAuraMesh.scale.set(pulse, pulse, 1);
+    }
 
     // Camera Rig (1st-Person vs 3rd-Person Orbit + Shake + Terrain Clamping)
     const shake = this.trauma * this.trauma;
@@ -3300,6 +3424,18 @@ export class ShadowVoxelEngine {
       s > 0.3 ? 'DAY' : s > 0 ? (Math.cos(this.worldTime) > 0 ? 'DAWN' : 'DUSK') : 'NIGHT';
 
     const blueCastles = this.castles.filter((c) => c.owner === 'blue').length;
+    const lineage = LINEAGES[this.lineageId];
+    const shard = REALM_SHARDS.find((sh) => sh.id === this.shardId) ?? REALM_SHARDS[0];
+    const cult = CULTIVATION_REALMS[Math.min(CULTIVATION_REALMS.length - 1, Math.max(0, this.cultivationTier))];
+    const powerStats = computeHeroPowerStats({
+      classKey: this.classKey,
+      lineageId: this.lineageId,
+      level: this.level,
+      cultivationTier: this.cultivationTier,
+      skills: this.skills,
+      weaponTier: this.inventory.weaponTier,
+      infinityTier: this.infinityTier,
+    });
 
     this.cb.onHudUpdate({
       phase: this.phase,
@@ -3307,6 +3443,16 @@ export class ShadowVoxelEngine {
       playerName: this.playerName,
       classKey: this.classKey,
       className: HERO_CLASSES[this.classKey].name,
+      lineageId: this.lineageId,
+      lineageName: lineage.name,
+      shardId: shard.id,
+      shardName: shard.name,
+      guildId: this.guildId,
+      guildTag: this.guildTag,
+      cultivationTier: this.cultivationTier,
+      cultivationName: cult.name,
+      spiritStones: this.spiritStones,
+      combatPower: powerStats.combatPower,
       level: this.level,
       hp: Math.round(this.hp),
       maxHp: this.maxHp,
