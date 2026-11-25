@@ -107,6 +107,7 @@ const SUITE_ITEMS: Array<{ key: Exclude<SuiteModalKey, null>; label: string; hot
   { key: 'craft', label: 'Forge', hotkey: 'C' },
   { key: 'skills', label: 'Skills', hotkey: 'K' },
   { key: 'guilds', label: 'Guilds', hotkey: 'U' },
+  { key: 'arcade', label: 'Arcade', hotkey: 'J' },
   { key: 'leo', label: 'L.E.O.', hotkey: 'L' },
   { key: 'meme', label: 'MemeForge', hotkey: 'M' },
   { key: 'omni', label: 'XR Cinema', hotkey: 'O' },

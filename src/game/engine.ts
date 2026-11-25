@@ -3,9 +3,13 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RealmAudioEngine, type SfxName } from './audio';
 import {
   createAdDroneTexture,
+  createArcadePavilion,
   createCampfireProp,
+  createEmeraldCliffWaterfall,
+  createGeminIslandVillager,
   createHumanoidRig,
   createIslandBuggy,
+  createIslandTransitShuttle,
   createLeoOrbModel,
   createLoraBioLab,
   createRainyBookstoreCabin,
@@ -13,7 +17,10 @@ import {
   createSpamDroneModel,
   createStoneBumpTexture,
   type BuggyModel,
+  type EmeraldWaterfallModel,
   type HumanoidRig,
+  type IslandVillagerRig,
+  type TransitShuttleModel,
 } from './models';
 import {
   CULTIVATION_REALMS,
@@ -70,7 +77,7 @@ export interface EngineCallbacks {
   onPopupAd: (ad: PopupAdItem) => void;
   onClearPopups: () => void;
   onFloatLabel: (label: FloatingLabel) => void;
-  onOpenModal?: (modal: 'craft' | 'skills' | 'guilds' | 'leo' | 'meme' | 'omni' | 'vibe' | 'lora' | 'gm') => void;
+  onOpenModal?: (modal: 'craft' | 'skills' | 'guilds' | 'arcade' | 'leo' | 'meme' | 'omni' | 'vibe' | 'lora' | 'gm') => void;
 }
 
 interface EnemyEntity {
@@ -219,6 +226,7 @@ export class ShadowVoxelEngine {
   private dungeonExitRing!: THREE.Mesh;
   private dnaHelix!: THREE.Group;
   private waterMesh!: THREE.Mesh;
+  private emeraldWaterfall: EmeraldWaterfallModel | null = null;
 
   // Billboard & Cinema CanvasTextures
   private billboardCanvas!: HTMLCanvasElement;
@@ -297,11 +305,40 @@ export class ShadowVoxelEngine {
   private buggyRotY = -0.5;
   private buggySpeed = 0;
   private inBuggy = false;
+  private islandShuttle!: TransitShuttleModel;
+  private readonly shuttleRoute: Array<{ x: number; z: number; name: string }> = [
+    { x: 10, z: 16, name: 'Infinity Core Plaza' },
+    { x: 24, z: 28, name: 'GeminIsland Arcade' },
+    { x: 18, z: 48, name: 'OmniStream XR Cinema' },
+    { x: -16, z: 54, name: 'Ashen Coast Overlook' },
+    { x: -34, z: 62, name: 'Emerald Cliff Waterfall' },
+    { x: -32, z: 26, name: 'Rainy Bookstore' },
+  ];
+  private shuttleSeg = 0;
+  private shuttleT = 0;
+  private shuttleX = 10;
+  private shuttleY = 2.5;
+  private shuttleZ = 16;
+  private shuttleRotY = 0;
+  private inShuttle = false;
+  private arcadeWins = 0;
   private isFishing = false;
   private fishTimer = 0;
   private bobberMesh!: THREE.Mesh;
   private bobberRipple!: THREE.Mesh;
   private campfires: Array<{ x: number; z: number; group: THREE.Group }> = [];
+  private islandVillagers: Array<{
+    name: string;
+    line: string;
+    x: number;
+    z: number;
+    homeX: number;
+    homeZ: number;
+    goalX: number;
+    goalZ: number;
+    timer: number;
+    rig: IslandVillagerRig;
+  }> = [];
 
   // Companions (Lira & L.E.O.) + Lore NPCs (Lin_Jie & Ji_Zhixiu)
   private liraRig!: HumanoidRig;
@@ -849,6 +886,24 @@ export class ShadowVoxelEngine {
     const bookstore = createRainyBookstoreCabin();
     bookstore.position.set(LANDMARKS.bookstore.x, getTerrainHeight(LANDMARKS.bookstore.x, LANDMARKS.bookstore.z), LANDMARKS.bookstore.z);
     this.scene.add(bookstore);
+
+    // 9. GeminIsland Emerald Cliff Waterfall (Granite Massif + Twin Aqua Curtains + Plunge Lagoon)
+    this.emeraldWaterfall = createEmeraldCliffWaterfall();
+    this.emeraldWaterfall.group.position.set(
+      LANDMARKS.waterfall.x,
+      getTerrainHeight(LANDMARKS.waterfall.x, LANDMARKS.waterfall.z) - 0.1,
+      LANDMARKS.waterfall.z,
+    );
+    this.scene.add(this.emeraldWaterfall.group);
+
+    // 10. GeminIsland Interactive Arcade Pavilion (Tic-Tac-Toe, Simon Synth, Lights Out)
+    const arcadePavilion = createArcadePavilion();
+    arcadePavilion.position.set(
+      LANDMARKS.arcade.x,
+      getTerrainHeight(LANDMARKS.arcade.x, LANDMARKS.arcade.z),
+      LANDMARKS.arcade.z,
+    );
+    this.scene.add(arcadePavilion);
   }
 
   private buildDungeonArena(): void {
@@ -1114,6 +1169,96 @@ export class ShadowVoxelEngine {
       rig.group.position.set(p.tx, getTerrainHeight(p.tx, p.tz), p.tz);
       this.scene.add(rig.group);
       this.allyAdventurers.push({ ...p, x: p.tx, z: p.tz, goalX: p.tx, goalZ: p.tz, timer: 2.5, rig });
+    });
+
+    // Autonomous GeminIsland Transit Shuttle cruising the scenic island loop
+    this.islandShuttle = createIslandTransitShuttle();
+    const s0 = this.shuttleRoute[0];
+    this.shuttleX = s0.x;
+    this.shuttleZ = s0.z;
+    this.shuttleY = Math.max(WATER_LEVEL + 0.1, getTerrainHeight(s0.x, s0.z));
+    this.islandShuttle.group.position.set(this.shuttleX, this.shuttleY, this.shuttleZ);
+    this.scene.add(this.islandShuttle.group);
+
+    // 6 Articulated GeminIsland Voxel Villagers strolling Plaza, Arcade & Emerald Falls
+    const villagerDefs = [
+      {
+        name: 'Talia (Island Botanist)',
+        line: 'The Emerald Cliff Waterfall mist keeps our island moss glowing all year!',
+        x: LANDMARKS.waterfall.x - 7,
+        z: LANDMARKS.waterfall.z + 18,
+        shirt: 0x10b981,
+        hat: 0xfde047,
+        skin: 0xf1c27d,
+        pack: true,
+      },
+      {
+        name: 'Koi (Arcade Champ)',
+        line: 'Try beating my Tic-Tac-Toe and Lights Out high scores inside the GeminIsland Arcade [J]!',
+        x: LANDMARKS.arcade.x - 5,
+        z: LANDMARKS.arcade.z + 6,
+        shirt: 0x38bdf8,
+        hat: 0xf43f5e,
+        skin: 0xe0ac69,
+        pack: false,
+      },
+      {
+        name: 'Mina (Transit Guide)',
+        line: 'Hop on the teal Island Transit Shuttle with [E] for a calm loop past the Arcade, Cinema, and Waterfall.',
+        x: 6,
+        z: 18,
+        shirt: 0x0d9488,
+        hat: 0xfef08a,
+        skin: 0xffdbac,
+        pack: true,
+      },
+      {
+        name: 'Bram (Voxel Mason)',
+        line: 'We carved the granite massif at Emerald Falls block by block—visit the viewing deck!',
+        x: LANDMARKS.waterfall.x + 8,
+        z: LANDMARKS.waterfall.z + 17,
+        shirt: 0xf59e0b,
+        hat: 0x475569,
+        skin: 0xc68642,
+        pack: true,
+      },
+      {
+        name: 'Nori (Synth Busker)',
+        line: 'Simon Synth inside the Arcade uses the same pitched chime synthesizer as VibePitch!',
+        x: LANDMARKS.arcade.x + 6,
+        z: LANDMARKS.arcade.z + 5,
+        shirt: 0xa855f7,
+        hat: 0x22d3ee,
+        skin: 0xf1c27d,
+        pack: false,
+      },
+      {
+        name: 'Sora (Plaza Stroller)',
+        line: 'Peaceful day on GeminIsland! Watch out for Obsidian patrols east of the Citadel.',
+        x: -9,
+        z: 14,
+        shirt: 0xf472b6,
+        hat: 0xf8fafc,
+        skin: 0x8d5524,
+        pack: false,
+      },
+    ];
+    villagerDefs.forEach((v, idx) => {
+      const rig = createGeminIslandVillager(v.shirt, v.hat, v.skin, v.pack);
+      rig.group.position.set(v.x, getTerrainHeight(v.x, v.z), v.z);
+      this.scene.add(rig.group);
+      this.islandVillagers.push({
+        name: v.name,
+        line: v.line,
+        x: v.x,
+        z: v.z,
+        homeX: v.x,
+        homeZ: v.z,
+        goalX: v.x,
+        goalZ: v.z,
+        timer: 1.5 + idx * 0.6,
+        rig,
+      });
     });
   }
 
@@ -1551,6 +1696,7 @@ export class ShadowVoxelEngine {
     this.pRotY = Math.PI;
     this.inDungeon = false;
     this.inBuggy = false;
+    this.inShuttle = false;
     this.isFishing = false;
     this.clearPopups();
     this.startGame(this.playerName, this.classKey, this.lineageId, this.shardId);
@@ -1620,11 +1766,24 @@ export class ShadowVoxelEngine {
     this.emitHudSnapshot();
   }
 
+  public rewardArcadeWin(gameName: string, goldReward: number, xpReward: number, stoneReward: number): void {
+    this.arcadeWins += 1;
+    this.gold += goldReward;
+    this.spiritStones += stoneReward;
+    this.gainXp(xpReward);
+    this.audio.play('levelup');
+    this.spawnParticles(this.px, this.py + 2.1, this.pz, 0x38bdf8, 22, 12);
+    this.pushFloatLabel(this.px, this.py + 3.4, this.pz, `${gameName} WIN! +${goldReward}G`, '#38bdf8');
+    this.cb.onToast(`GeminIsland Arcade (${gameName}): +${goldReward} Gold, +${xpReward} XP, +${stoneReward} Spirit Stones!`);
+    this.emitHudSnapshot();
+  }
+
   public teleportTo(target: LandmarkKey): void {
     const lm = LANDMARKS[target];
     if (!lm) return;
     this.inDungeon = false;
     this.inBuggy = false;
+    this.inShuttle = false;
     const zOffsets: Record<LandmarkKey, number> = {
       spawn: 11,
       blueCastle: 19,
@@ -1635,13 +1794,25 @@ export class ShadowVoxelEngine {
       biolab: 13,
       bookstore: 9,
       sea: -26,
+      waterfall: 22,
+      arcade: 9,
     };
     this.px = lm.x;
     this.pz = lm.z + zOffsets[target];
     this.py = getTerrainHeight(this.px, this.pz);
     this.pvy = 0;
     this.camYaw = 0;
+    this.camPitch = target === 'waterfall' ? 0.2 : 0.36;
     this.pRotY = Math.PI;
+    // Snap camera immediately on teleport so tall landmarks frame cleanly right away
+    const snapCx = this.px + Math.sin(this.camYaw) * Math.cos(this.camPitch) * this.camDist;
+    const snapCz = this.pz + Math.cos(this.camYaw) * Math.cos(this.camPitch) * this.camDist;
+    const snapCy = Math.max(
+      this.py + 3.1 + Math.sin(this.camPitch) * this.camDist,
+      getTerrainHeight(snapCx, snapCz) + 1.8,
+    );
+    this.camera.position.set(snapCx, snapCy, snapCz);
+    this.camera.lookAt(this.px, this.py + 2.2, this.pz);
     this.audio.play('shadow');
     this.spawnParticles(this.px, this.py + 1.8, this.pz, 0x38bdf8, 18, 10);
     this.cb.onToast(`Teleported to ${lm.name}`);
@@ -2173,7 +2344,26 @@ export class ShadowVoxelEngine {
   private handleInteractE(): void {
     if (this.phase !== 'playing') return;
 
-    // 1. Exit / Enter Island Buggy
+    // 1. Alight / Board Autonomous Island Transit Shuttle
+    if (this.inShuttle) {
+      this.inShuttle = false;
+      this.px = this.shuttleX + Math.cos(this.shuttleRotY) * 3.2;
+      this.pz = this.shuttleZ - Math.sin(this.shuttleRotY) * 3.2;
+      this.py = getTerrainHeight(this.px, this.pz);
+      this.cb.onToast('Alighted from GeminIsland Transit Shuttle');
+      this.emitHudSnapshot();
+      return;
+    }
+    if (!this.inDungeon && !this.inBuggy && Math.hypot(this.px - this.shuttleX, this.pz - this.shuttleZ) < 6.8) {
+      this.inShuttle = true;
+      this.isFishing = false;
+      this.audio.play('jump');
+      this.cb.onToast('Riding GeminIsland Transit Shuttle (Scenic Loop — press E anytime to alight)');
+      this.emitHudSnapshot();
+      return;
+    }
+
+    // 1b. Exit / Enter Island Buggy
     if (this.inBuggy) {
       this.inBuggy = false;
       this.px = this.buggyX - Math.cos(this.buggyRotY) * 2.6;
@@ -2227,7 +2417,23 @@ export class ShadowVoxelEngine {
       }
     }
 
-    // 4. OmniStream Cinema or LoRAFlow Bio-Lab Quick Open
+    // 3b. GeminIsland Strolling Villagers
+    for (const v of this.islandVillagers) {
+      if (!this.inDungeon && Math.hypot(this.px - v.x, this.pz - v.z) < 4.8) {
+        this.gold += 8;
+        this.audio.play('adblock');
+        this.cb.onToast(`${v.name}: "${v.line}" (+8 Gold)`);
+        this.cb.onChat({ id: `c_${this.chatIdSeq++}`, sender: v.name, text: v.line, tone: 'normal' });
+        this.emitHudSnapshot();
+        return;
+      }
+    }
+
+    // 4. GeminIsland Arcade, OmniStream Cinema, or LoRAFlow Bio-Lab Quick Open
+    if (!this.inDungeon && Math.hypot(this.px - LANDMARKS.arcade.x, this.pz - LANDMARKS.arcade.z) < 9.5) {
+      this.cb.onOpenModal?.('arcade');
+      return;
+    }
     if (Math.hypot(this.px - LANDMARKS.cinema.x, this.pz - LANDMARKS.cinema.z) < 12) {
       this.cb.onOpenModal?.('omni');
       return;
@@ -2622,6 +2828,24 @@ export class ShadowVoxelEngine {
     this.dnaHelix.rotation.y += dt * 0.9;
     this.waterMesh.position.y = WATER_LEVEL + Math.sin(t * 1.8) * 0.08;
 
+    // Animate GeminIsland Emerald Cliff Waterfall rising plunge mist & aqua shimmer
+    if (this.emeraldWaterfall) {
+      this.emeraldWaterfall.curtainMat.emissiveIntensity = 0.68 + Math.sin(t * 4.5) * 0.14;
+      for (const puff of this.emeraldWaterfall.mistPuffs) {
+        const cycle = (t * puff.speed * 0.45 + puff.phase) % 1;
+        puff.mesh.position.set(
+          puff.baseX + Math.sin(t * 1.6 + puff.phase) * 0.55,
+          1.1 + cycle * 3.4,
+          puff.baseZ + cycle * 1.1,
+        );
+        const s = 0.65 + Math.sin(cycle * Math.PI) * 0.75;
+        puff.mesh.scale.setScalar(s);
+      }
+    }
+
+    // Autonomous GeminIsland Transit Shuttle loop & strolling villagers
+    this.stepShuttleAndVillagers(dt, t);
+
     for (const c of this.castles) {
       c.crystal.rotation.y += dt * 1.35;
       c.crystal.position.y = 4.6 + Math.sin(t * 2.4 + c.x) * 0.38;
@@ -2744,7 +2968,17 @@ export class ShadowVoxelEngine {
     if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) mx -= 1;
     if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) mx += 1;
 
-    if (this.inBuggy) {
+    if (this.inShuttle) {
+      // Riding the Autonomous GeminIsland Transit Shuttle along the scenic island loop
+      this.px = this.shuttleX;
+      this.py = this.shuttleY + 1.1;
+      this.pz = this.shuttleZ;
+      this.pRotY = this.shuttleRotY;
+      this.pvx = 0;
+      this.pvy = 0;
+      this.pvz = 0;
+      this.playerRig.group.visible = false;
+    } else if (this.inBuggy) {
       // GeminIsland Off-Road Buggy Driving Physics
       const accel = (this.dashTimer > 0 ? 46 : 32);
       const maxSpd = this.dashTimer > 0 ? 34 : 25;
@@ -2887,7 +3121,7 @@ export class ShadowVoxelEngine {
       const lookZ = this.pz - Math.cos(this.camYaw) * 12;
       this.camera.lookAt(lookX, this.py + 2.4 - (this.camPitch - 0.35) * 8, lookZ);
     } else {
-      const dist = this.inBuggy ? this.camDist + 3.5 : this.camDist;
+      const dist = this.inShuttle ? this.camDist + 4.8 : this.inBuggy ? this.camDist + 3.5 : this.camDist;
       const cx = this.px + Math.sin(this.camYaw) * Math.cos(this.camPitch) * dist;
       const cz = this.pz + Math.cos(this.camYaw) * Math.cos(this.camPitch) * dist;
       const desiredY = this.py + 3.1 + Math.sin(this.camPitch) * dist;
@@ -3218,6 +3452,86 @@ export class ShadowVoxelEngine {
     }
   }
 
+  private stepShuttleAndVillagers(dt: number, t: number): void {
+    // Autonomous GeminIsland Transit Shuttle cruising smooth waypoint loop
+    if (this.islandShuttle) {
+      this.islandShuttle.group.visible = !this.inDungeon;
+      const from = this.shuttleRoute[this.shuttleSeg];
+      const to = this.shuttleRoute[(this.shuttleSeg + 1) % this.shuttleRoute.length];
+      const dx = to.x - from.x;
+      const dz = to.z - from.z;
+      const segLen = Math.max(1, Math.hypot(dx, dz));
+      const shuttleSpeed = 9.2;
+      this.shuttleT += (shuttleSpeed * dt) / segLen;
+      if (this.shuttleT >= 1) {
+        this.shuttleT -= 1;
+        this.shuttleSeg = (this.shuttleSeg + 1) % this.shuttleRoute.length;
+      }
+      const a = this.shuttleRoute[this.shuttleSeg];
+      const b = this.shuttleRoute[(this.shuttleSeg + 1) % this.shuttleRoute.length];
+      this.shuttleX = a.x + (b.x - a.x) * this.shuttleT;
+      this.shuttleZ = a.z + (b.z - a.z) * this.shuttleT;
+      this.shuttleY = Math.max(WATER_LEVEL + 0.1, getTerrainHeight(this.shuttleX, this.shuttleZ));
+      const desiredYaw = Math.atan2(b.x - a.x, b.z - a.z);
+      let diff = desiredYaw - this.shuttleRotY;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      this.shuttleRotY += diff * Math.min(1, dt * 5.5);
+
+      const hFront = getTerrainHeight(
+        this.shuttleX + Math.sin(this.shuttleRotY) * 2.2,
+        this.shuttleZ + Math.cos(this.shuttleRotY) * 2.2,
+      );
+      const hBack = getTerrainHeight(
+        this.shuttleX - Math.sin(this.shuttleRotY) * 2.2,
+        this.shuttleZ - Math.cos(this.shuttleRotY) * 2.2,
+      );
+      this.islandShuttle.group.position.set(this.shuttleX, this.shuttleY, this.shuttleZ);
+      this.islandShuttle.group.rotation.y = this.shuttleRotY;
+      this.islandShuttle.group.rotation.x = THREE.MathUtils.damp(
+        this.islandShuttle.group.rotation.x,
+        Math.atan2(hBack - hFront, 4.4),
+        6,
+        dt,
+      );
+      for (const w of this.islandShuttle.wheels) {
+        w.rotation.x += (shuttleSpeed / 0.56) * dt;
+      }
+    }
+
+    // Articulated GeminIsland Micro-Voxel Villagers strolling gently
+    for (const v of this.islandVillagers) {
+      v.rig.group.visible = !this.inDungeon;
+      if (this.inDungeon) continue;
+      v.timer -= dt;
+      if (v.timer <= 0) {
+        v.timer = 3.5 + Math.random() * 4.5;
+        v.goalX = v.homeX + (Math.random() - 0.5) * 10;
+        v.goalZ = v.homeZ + (Math.random() - 0.5) * 10;
+      }
+      const dx = v.goalX - v.x;
+      const dz = v.goalZ - v.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 0.6) {
+        v.x += (dx / d) * 2.6 * dt;
+        v.z += (dz / d) * 2.6 * dt;
+        const vy = Math.max(WATER_LEVEL + 0.15, getTerrainHeight(v.x, v.z));
+        v.rig.group.position.set(v.x, vy, v.z);
+        v.rig.group.rotation.y = Math.atan2(dx, dz);
+        const sw = Math.sin(t * 7.5 + v.homeX) * 0.48;
+        v.rig.leftLeg.rotation.x = sw;
+        v.rig.rightLeg.rotation.x = -sw;
+        v.rig.leftArm.rotation.x = -sw * 0.7;
+        v.rig.rightArm.rotation.x = sw * 0.7;
+      } else {
+        v.rig.leftLeg.rotation.x = 0;
+        v.rig.rightLeg.rotation.x = 0;
+        v.rig.leftArm.rotation.x = 0;
+        v.rig.rightArm.rotation.x = 0;
+      }
+    }
+  }
+
   private stepProjectiles(dt: number): void {
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
@@ -3358,7 +3672,11 @@ export class ShadowVoxelEngine {
   }
 
   private computeInteractPrompt(): string | null {
+    if (this.inShuttle) return '[E] Alight from GeminIsland Transit Shuttle';
     if (this.inBuggy) return '[E] Exit Island Buggy';
+    if (!this.inDungeon && Math.hypot(this.px - this.shuttleX, this.pz - this.shuttleZ) < 6.8) {
+      return '[E] Board GeminIsland Transit Shuttle';
+    }
     if (!this.inDungeon && Math.hypot(this.px - this.buggyX, this.pz - this.buggyZ) < 6.0) {
       return '[E] Drive Island Buggy';
     }
@@ -3370,6 +3688,12 @@ export class ShadowVoxelEngine {
     }
     for (const npc of this.loreNpcs) {
       if (Math.hypot(this.px - npc.x, this.pz - npc.z) < 5.5) return `[E] Speak with ${npc.name}`;
+    }
+    for (const v of this.islandVillagers) {
+      if (!this.inDungeon && Math.hypot(this.px - v.x, this.pz - v.z) < 4.8) return `[E] Chat with ${v.name}`;
+    }
+    if (!this.inDungeon && Math.hypot(this.px - LANDMARKS.arcade.x, this.pz - LANDMARKS.arcade.z) < 9.5) {
+      return '[E] Play GeminIsland Arcade (Tic-Tac-Toe / Simon / Lights Out)';
     }
     if (Math.hypot(this.px - LANDMARKS.cinema.x, this.pz - LANDMARKS.cinema.z) < 12) {
       return '[E] Open OmniStream XR Cinema Controls';
@@ -3474,6 +3798,8 @@ export class ShadowVoxelEngine {
       ascendantActive: this.ascendantTimer > 0,
       bioSerumActive: this.bioSerumTimer > 0,
       inBuggy: this.inBuggy,
+      inShuttle: this.inShuttle,
+      arcadeWins: this.arcadeWins,
       inDungeon: this.inDungeon,
       isSwimming: !this.inDungeon && getTerrainHeight(this.px, this.pz) < WATER_LEVEL - 0.15,
       isFishing: this.isFishing,

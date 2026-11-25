@@ -18,10 +18,15 @@ import {
   applyXpGain,
   advanceCastleCapture,
   attemptCultivationBreakthrough,
+  checkTicTacToeWinner,
   compute2060BigIntOffsetNs,
   computeHeroPowerStats,
   computePlayerDamage,
+  createLightsOutPuzzle,
+  isLightsOutSolved,
+  pickTicTacToeAiMove,
   resolveOfflineLeoReply,
+  toggleLightsOutGrid,
   isValidSavePayload,
 } from './rules';
 
@@ -203,3 +208,25 @@ test('Cultivation Breakthrough enforces level and Spirit Stone requirements', ()
   assert.equal(breakthrough.spiritStones, 15);
   assert.equal(breakthrough.realmName, 'Qi Condensation');
 });
+
+test('GeminIsland Tic-Tac-Toe AI blocks wins, claims victories, and detects outcomes', () => {
+  const blockBoard = ['X', 'X', null, null, 'O', null, null, null, null] as const;
+  assert.equal(pickTicTacToeAiMove(blockBoard), 2);
+
+  const winBoard = ['O', 'O', null, 'X', 'X', null, null, null, null] as const;
+  assert.equal(pickTicTacToeAiMove(winBoard), 2);
+
+  assert.equal(checkTicTacToeWinner(['X', 'X', 'X', null, 'O', null, null, null, null]), 'X');
+  assert.equal(checkTicTacToeWinner(['X', 'O', 'X', 'X', 'O', 'O', 'O', 'X', 'X']), 'draw');
+});
+
+test('GeminIsland Lights Out puzzle toggles orthogonal neighbors and resolves solved state', () => {
+  const puzzle = createLightsOutPuzzle(0);
+  assert.equal(isLightsOutSolved(puzzle), false);
+  // Seed 0 was built from moves [4, 0, 8]; applying them in reverse extinguishes every cell
+  let board = toggleLightsOutGrid(puzzle, 8);
+  board = toggleLightsOutGrid(board, 0);
+  board = toggleLightsOutGrid(board, 4);
+  assert.equal(isLightsOutSolved(board), true);
+});
+

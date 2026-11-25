@@ -596,3 +596,102 @@ export function isValidSavePayload(raw: unknown): raw is SavePayload {
     typeof obj.maxHp === 'number'
   );
 }
+
+// =========================================================================
+// GEMINISLAND INTERACTIVE ARCADE MINI-GAME RULES (Pure Deterministic Logic)
+// =========================================================================
+
+export type TicTacToeCell = 'X' | 'O' | null;
+
+const TTT_LINES: ReadonlyArray<[number, number, number]> = [
+  [0, 1, 2],
+  [3, 4, 5],
+  [6, 7, 8],
+  [0, 3, 6],
+  [1, 4, 7],
+  [2, 5, 8],
+  [0, 4, 8],
+  [2, 4, 6],
+];
+
+export function checkTicTacToeWinner(board: readonly TicTacToeCell[]): 'X' | 'O' | 'draw' | null {
+  for (const [a, b, c] of TTT_LINES) {
+    if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+      return board[a];
+    }
+  }
+  if (board.every((cell) => cell !== null)) return 'draw';
+  return null;
+}
+
+/**
+ * Smart deterministic GeminIsland AI opponent ('O'):
+ * 1) Takes winning move if available.
+ * 2) Blocks player ('X') winning move.
+ * 3) Takes center, then corners, then edges.
+ */
+export function pickTicTacToeAiMove(board: readonly TicTacToeCell[]): number {
+  for (const mark of ['O', 'X'] as const) {
+    for (const [a, b, c] of TTT_LINES) {
+      const cells = [board[a], board[b], board[c]];
+      const indices = [a, b, c];
+      const countMark = cells.filter((v) => v === mark).length;
+      const emptySlot = cells.findIndex((v) => v === null);
+      if (countMark === 2 && emptySlot !== -1) {
+        return indices[emptySlot];
+      }
+    }
+  }
+  const priority = [4, 0, 2, 6, 8, 1, 3, 5, 7];
+  for (const idx of priority) {
+    if (board[idx] === null) return idx;
+  }
+  return -1;
+}
+
+/**
+ * 3x3 Voxel Lights Out toggle (toggles target cell + orthogonal neighbors).
+ */
+export function toggleLightsOutGrid(grid: readonly boolean[], index: number): boolean[] {
+  const next = [...grid];
+  if (index < 0 || index >= 9) return next;
+  const row = Math.floor(index / 3);
+  const col = index % 3;
+  const coords: Array<[number, number]> = [
+    [row, col],
+    [row - 1, col],
+    [row + 1, col],
+    [row, col - 1],
+    [row, col + 1],
+  ];
+  for (const [r, c] of coords) {
+    if (r >= 0 && r < 3 && c >= 0 && c < 3) {
+      const i = r * 3 + c;
+      next[i] = !next[i];
+    }
+  }
+  return next;
+}
+
+export function isLightsOutSolved(grid: readonly boolean[]): boolean {
+  return grid.length === 9 && grid.every((lit) => !lit);
+}
+
+/**
+ * Generates a guaranteed-solvable 3x3 Lights Out puzzle by applying deterministic moves from a solved board.
+ */
+export function createLightsOutPuzzle(seed = 1): boolean[] {
+  const patterns: ReadonlyArray<readonly number[]> = [
+    [4, 0, 8],
+    [1, 3, 5, 7],
+    [0, 2, 4, 6],
+    [2, 5, 6, 8],
+  ];
+  const moves = patterns[Math.abs(seed) % patterns.length];
+  let grid = Array<boolean>(9).fill(false);
+  for (const idx of moves) {
+    grid = toggleLightsOutGrid(grid, idx);
+  }
+  return grid;
+}
+

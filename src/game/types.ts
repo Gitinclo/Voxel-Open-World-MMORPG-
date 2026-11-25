@@ -19,6 +19,7 @@ export type SuiteModalKey =
   | 'craft'
   | 'skills'
   | 'guilds'
+  | 'arcade'
   | 'leo'
   | 'meme'
   | 'omni'
@@ -35,7 +36,9 @@ export type LandmarkKey =
   | 'cinema'
   | 'biolab'
   | 'bookstore'
-  | 'sea';
+  | 'sea'
+  | 'waterfall'
+  | 'arcade';
 
 export interface HeroClassSpec {
   key: HeroClassKey;
@@ -224,6 +227,8 @@ export interface HudSnapshot {
   ascendantActive: boolean;
   bioSerumActive: boolean;
   inBuggy: boolean;
+  inShuttle: boolean;
+  arcadeWins: number;
   inDungeon: boolean;
   isSwimming: boolean;
   isFishing: boolean;

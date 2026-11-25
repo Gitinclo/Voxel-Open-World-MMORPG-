@@ -750,3 +750,323 @@ export function createCampfireProp(): THREE.Group {
   g.add(log1, log2, flame);
   return g;
 }
+
+export interface EmeraldWaterfallModel {
+  group: THREE.Group;
+  mistPuffs: Array<{ mesh: THREE.Mesh; baseX: number; baseZ: number; phase: number; speed: number }>;
+  curtainMat: THREE.MeshStandardMaterial;
+}
+
+/**
+ * Emerald Cliff Waterfall (GeminIsland world_landmarks_v16.ts):
+ * Asymmetric granite cliff massif capped with emerald moss terraces,
+ * twin glowing aqua waterfall curtains plunging into a turquoise lagoon pool,
+ * and animated rising plunge mist.
+ */
+export function createEmeraldCliffWaterfall(): EmeraldWaterfallModel {
+  const group = new THREE.Group();
+  const graniteMat = new THREE.MeshStandardMaterial({ color: 0x5c6472, roughness: 0.9, metalness: 0.08 });
+  const darkRockMat = new THREE.MeshStandardMaterial({ color: 0x3f4754, roughness: 0.94, metalness: 0.06 });
+  const mossMat = new THREE.MeshStandardMaterial({ color: 0x268b52, roughness: 0.84, metalness: 0.04 });
+  const lagoonMat = new THREE.MeshStandardMaterial({
+    color: 0x16b8c4,
+    emissive: 0x0b6978,
+    emissiveIntensity: 0.5,
+    roughness: 0.16,
+    metalness: 0.15,
+    transparent: true,
+    opacity: 0.86,
+  });
+  const curtainMat = new THREE.MeshStandardMaterial({
+    color: 0x6ef2ff,
+    emissive: 0x22c8e8,
+    emissiveIntensity: 0.75,
+    roughness: 0.14,
+    metalness: 0.05,
+    transparent: true,
+    opacity: 0.78,
+  });
+  const mistMat = new THREE.MeshBasicMaterial({
+    color: 0xe6fcff,
+    transparent: true,
+    opacity: 0.45,
+    depthWrite: false,
+  });
+
+  // Stepped granite cliff massif (asymmetrical 3-tier voxel blocks)
+  const mainCliff = new THREE.Mesh(new THREE.BoxGeometry(16.5, 14.5, 9.5), graniteMat);
+  mainCliff.position.set(0, 7.25, -4.5);
+  mainCliff.castShadow = true;
+  mainCliff.receiveShadow = true;
+
+  const leftShoulder = new THREE.Mesh(new THREE.BoxGeometry(7.2, 10.2, 8.2), darkRockMat);
+  leftShoulder.position.set(-9.4, 5.1, -3.2);
+  leftShoulder.castShadow = true;
+
+  const rightSpur = new THREE.Mesh(new THREE.BoxGeometry(6.8, 8.6, 7.6), darkRockMat);
+  rightSpur.position.set(9.2, 4.3, -2.8);
+  rightSpur.castShadow = true;
+
+  const midLedge = new THREE.Mesh(new THREE.BoxGeometry(9.6, 5.4, 4.4), graniteMat);
+  midLedge.position.set(-1.2, 2.7, -0.5);
+
+  // Emerald moss terrace caps
+  const topMoss = new THREE.Mesh(new THREE.BoxGeometry(17.1, 1.0, 10.1), mossMat);
+  topMoss.position.set(0, 14.8, -4.5);
+  const leftMoss = new THREE.Mesh(new THREE.BoxGeometry(7.6, 0.85, 8.6), mossMat);
+  leftMoss.position.set(-9.4, 10.5, -3.2);
+  const rightMoss = new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.8, 8.0), mossMat);
+  rightMoss.position.set(9.2, 8.9, -2.8);
+
+  // Twin glowing aqua waterfall curtains plunging down the cliff face
+  const curtainMain = new THREE.Mesh(new THREE.BoxGeometry(4.2, 13.8, 0.85), curtainMat);
+  curtainMain.position.set(-1.6, 7.5, 0.5);
+  const curtainSide = new THREE.Mesh(new THREE.BoxGeometry(2.3, 12.2, 0.72), curtainMat);
+  curtainSide.position.set(3.4, 6.8, 0.4);
+
+  // Top spillover water lip
+  const upperStream = new THREE.Mesh(new THREE.BoxGeometry(7.8, 0.32, 4.2), lagoonMat);
+  upperStream.position.set(0.6, 15.32, -2.0);
+
+  // Turquoise plunge lagoon pool & stepped stone rim
+  const poolRim = new THREE.Mesh(new THREE.CylinderGeometry(11.4, 12.2, 0.7, 18), darkRockMat);
+  poolRim.position.set(0.4, 0.35, 4.8);
+  poolRim.receiveShadow = true;
+
+  const lagoonPool = new THREE.Mesh(new THREE.CylinderGeometry(10.2, 10.4, 0.55, 18), lagoonMat);
+  lagoonPool.position.set(0.4, 0.52, 4.8);
+
+  // Rising plunge mist spheres (animated in engine.step)
+  const mistPuffs: EmeraldWaterfallModel['mistPuffs'] = [];
+  const mistGeo = new THREE.SphereGeometry(0.95, 8, 8);
+  for (let i = 0; i < 8; i++) {
+    const mesh = new THREE.Mesh(mistGeo, mistMat);
+    const baseX = -3.4 + (i % 4) * 2.4 + (i > 3 ? 0.6 : 0);
+    const baseZ = 1.4 + (i % 2) * 1.3;
+    mesh.position.set(baseX, 1.2 + (i % 3) * 0.6, baseZ);
+    group.add(mesh);
+    mistPuffs.push({ mesh, baseX, baseZ, phase: i * 0.85, speed: 1.4 + (i % 3) * 0.35 });
+  }
+
+  // Framing wooden footbridge / viewing deck edge
+  const deckMat = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.85 });
+  const viewingDeck = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.36, 3.2), deckMat);
+  viewingDeck.position.set(0.4, 0.82, 14.2);
+
+  group.add(
+    mainCliff,
+    leftShoulder,
+    rightSpur,
+    midLedge,
+    topMoss,
+    leftMoss,
+    rightMoss,
+    curtainMain,
+    curtainSide,
+    upperStream,
+    poolRim,
+    lagoonPool,
+    viewingDeck,
+  );
+  return { group, mistPuffs, curtainMat };
+}
+
+/**
+ * GeminIsland Interactive Arcade Pavilion (interactive_games.js):
+ * Open-air voxel arcade kiosk housing Tic-Tac-Toe, Simon Synth, and Lights Out cabinets.
+ */
+export function createArcadePavilion(): THREE.Group {
+  const group = new THREE.Group();
+  const baseMat = new THREE.MeshStandardMaterial({ color: 0x2a3347, roughness: 0.78, metalness: 0.2 });
+  const canopyMat = new THREE.MeshStandardMaterial({ color: 0x0f766e, roughness: 0.55, metalness: 0.25 });
+  const pillarMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.42, metalness: 0.45 });
+  const cabBodyMat = new THREE.MeshStandardMaterial({ color: 0x1e1b4b, roughness: 0.5, metalness: 0.3 });
+  const screenCyan = new THREE.MeshStandardMaterial({
+    color: 0x38bdf8,
+    emissive: 0x0284c7,
+    emissiveIntensity: 1.25,
+    roughness: 0.15,
+  });
+  const screenAmber = new THREE.MeshStandardMaterial({
+    color: 0xfbbf24,
+    emissive: 0xd97706,
+    emissiveIntensity: 1.25,
+    roughness: 0.15,
+  });
+  const screenPink = new THREE.MeshStandardMaterial({
+    color: 0xf472b6,
+    emissive: 0xdb2777,
+    emissiveIntensity: 1.25,
+    roughness: 0.15,
+  });
+
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(9.6, 0.5, 7.2), baseMat);
+  deck.position.y = 0.25;
+  deck.receiveShadow = true;
+
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(10.2, 0.55, 7.8), canopyMat);
+  roof.position.y = 4.65;
+  roof.castShadow = true;
+
+  const neonTrim = new THREE.Mesh(new THREE.BoxGeometry(10.35, 0.16, 7.95), screenCyan);
+  neonTrim.position.y = 4.35;
+
+  const pillarCoords: Array<[number, number]> = [
+    [-4.3, -3.1],
+    [4.3, -3.1],
+    [-4.3, 3.1],
+    [4.3, 3.1],
+  ];
+  for (const [px, pz] of pillarCoords) {
+    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 4.1, 8), pillarMat);
+    p.position.set(px, 2.45, pz);
+    group.add(p);
+  }
+
+  // 3 glowing Voxel Arcade Cabinets (Tic-Tac-Toe, Simon Synth, Lights Out)
+  const cabSpecs = [
+    { x: -2.6, mat: screenCyan },
+    { x: 0, mat: screenAmber },
+    { x: 2.6, mat: screenPink },
+  ];
+  for (const cab of cabSpecs) {
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.45, 2.35, 1.15), cabBodyMat);
+    body.position.set(cab.x, 1.65, -1.6);
+    body.castShadow = true;
+    const screen = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.86, 0.14), cab.mat);
+    screen.position.set(cab.x, 2.08, -0.99);
+    const marquee = new THREE.Mesh(new THREE.BoxGeometry(1.24, 0.28, 0.18), cab.mat);
+    marquee.position.set(cab.x, 2.74, -0.96);
+    group.add(body, screen, marquee);
+  }
+
+  group.add(deck, roof, neonTrim);
+  return group;
+}
+
+export interface IslandVillagerRig {
+  group: THREE.Group;
+  leftLeg: THREE.Mesh;
+  rightLeg: THREE.Mesh;
+  leftArm: THREE.Mesh;
+  rightArm: THREE.Mesh;
+}
+
+/**
+ * Articulated GeminIsland Micro-Voxel Villager (villagers.js):
+ * Distinct skin tones, bright island shirts, sun hats with brims, optional explorer backpack,
+ * and swinging arms & legs.
+ */
+export function createGeminIslandVillager(
+  shirtHex: number,
+  hatHex: number,
+  skinHex: number,
+  hasBackpack: boolean,
+): IslandVillagerRig {
+  const group = new THREE.Group();
+  const skinMat = new THREE.MeshStandardMaterial({ color: skinHex, roughness: 0.72 });
+  const shirtMat = new THREE.MeshStandardMaterial({ color: shirtHex, roughness: 0.75 });
+  const pantMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.84 });
+  const hatMat = new THREE.MeshStandardMaterial({ color: hatHex, roughness: 0.78 });
+  const packMat = new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.85 });
+
+  const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.62, 0.24), pantMat);
+  leftLeg.position.set(-0.15, 0.31, 0);
+  const rightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.62, 0.24), pantMat);
+  rightLeg.position.set(0.15, 0.31, 0);
+
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.74, 0.38), shirtMat);
+  torso.position.y = 0.99;
+  torso.castShadow = true;
+
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.46, 0.46), skinMat);
+  head.position.y = 1.62;
+  head.castShadow = true;
+
+  const hatBrim = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.08, 0.76), hatMat);
+  hatBrim.position.y = 1.88;
+  const hatCrown = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.22, 0.48), hatMat);
+  hatCrown.position.y = 2.02;
+
+  const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.58, 0.18), shirtMat);
+  leftArm.position.set(-0.41, 1.0, 0);
+  const rightArm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.58, 0.18), shirtMat);
+  rightArm.position.set(0.41, 1.0, 0);
+
+  group.add(leftLeg, rightLeg, torso, head, hatBrim, hatCrown, leftArm, rightArm);
+
+  if (hasBackpack) {
+    const pack = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.54, 0.24), packMat);
+    pack.position.set(0, 1.02, -0.3);
+    group.add(pack);
+  }
+
+  return { group, leftLeg, rightLeg, leftArm, rightArm };
+}
+
+export interface TransitShuttleModel {
+  group: THREE.Group;
+  wheels: THREE.Mesh[];
+}
+
+/**
+ * Autonomous GeminIsland Transit Shuttle / Calm Island Bus (vehicle_physics.js & interiors_and_transit.js):
+ * Teal & cream voxel shuttle with panoramic tinted windows, roof luggage rack, LED headlights, and rotating wheels.
+ */
+export function createIslandTransitShuttle(): TransitShuttleModel {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x0d9488, roughness: 0.42, metalness: 0.25 });
+  const creamMat = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.48, metalness: 0.15 });
+  const glassMat = new THREE.MeshStandardMaterial({
+    color: 0x0f172a,
+    emissive: 0x0ea5e9,
+    emissiveIntensity: 0.22,
+    roughness: 0.16,
+    metalness: 0.6,
+  });
+  const tireMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.9 });
+  const lightMat = new THREE.MeshStandardMaterial({
+    color: 0xfef08a,
+    emissive: 0xfacc15,
+    emissiveIntensity: 1.5,
+  });
+
+  const lowerChassis = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.05, 5.8), bodyMat);
+  lowerChassis.position.y = 1.05;
+  lowerChassis.castShadow = true;
+
+  const upperCabin = new THREE.Mesh(new THREE.BoxGeometry(2.5, 1.15, 5.4), creamMat);
+  upperCabin.position.y = 2.15;
+  upperCabin.castShadow = true;
+
+  const windowBand = new THREE.Mesh(new THREE.BoxGeometry(2.56, 0.72, 4.9), glassMat);
+  windowBand.position.y = 2.16;
+
+  const roofRack = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.18, 3.8), bodyMat);
+  roofRack.position.y = 2.82;
+
+  const hlL = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.28, 0.14), lightMat);
+  hlL.position.set(-0.82, 1.05, 2.94);
+  const hlR = hlL.clone();
+  hlR.position.x = 0.82;
+
+  const wheels: THREE.Mesh[] = [];
+  const wheelGeo = new THREE.CylinderGeometry(0.56, 0.56, 0.44, 14);
+  wheelGeo.rotateZ(Math.PI / 2);
+  const wheelCoords: Array<[number, number]> = [
+    [-1.36, 1.85],
+    [1.36, 1.85],
+    [-1.36, -1.85],
+    [1.36, -1.85],
+  ];
+  for (const [wx, wz] of wheelCoords) {
+    const wheel = new THREE.Mesh(wheelGeo, tireMat);
+    wheel.position.set(wx, 0.56, wz);
+    group.add(wheel);
+    wheels.push(wheel);
+  }
+
+  group.add(lowerChassis, upperCabin, windowBand, roofRack, hlL, hlR);
+  return { group, wheels };
+}
+

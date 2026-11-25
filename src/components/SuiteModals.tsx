@@ -1,6 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { ShadowVoxelEngine } from '../game/engine';
-import { CULTIVATION_REALMS, REALM_SHARDS, compute2060BigIntOffsetNs, resolveOfflineLeoReply } from '../game/rules';
+import {
+  CULTIVATION_REALMS,
+  REALM_SHARDS,
+  checkTicTacToeWinner,
+  compute2060BigIntOffsetNs,
+  createLightsOutPuzzle,
+  isLightsOutSolved,
+  pickTicTacToeAiMove,
+  resolveOfflineLeoReply,
+  toggleLightsOutGrid,
+  type TicTacToeCell,
+} from '../game/rules';
 import type {
   CastleSiegeState,
   GuildRecord,
@@ -81,6 +92,127 @@ export const SuiteModals: React.FC<SuiteModalsProps> = ({
   const [newGuildName, setNewGuildName] = useState('');
   const [newGuildTag, setNewGuildTag] = useState('');
   const [guildStatus, setGuildStatus] = useState<string | null>(null);
+
+  // GeminIsland Interactive Arcade State (Tic-Tac-Toe, Simon Synth, Lights Out)
+  const [arcadeTab, setArcadeTab] = useState<'ttt' | 'simon' | 'lights'>('ttt');
+  const [tttBoard, setTttBoard] = useState<TicTacToeCell[]>(() => Array<TicTacToeCell>(9).fill(null));
+  const [tttStatus, setTttStatus] = useState('Your turn (X) — beat the Island AI for +120 Gold & +15 Spirit Stones!');
+  const [lightsSeed, setLightsSeed] = useState(0);
+  const [lightsGrid, setLightsGrid] = useState<boolean[]>(() => createLightsOutPuzzle(0));
+  const [lightsMoves, setLightsMoves] = useState(0);
+  const [lightsSolved, setLightsSolved] = useState(false);
+  const [simonSeq, setSimonSeq] = useState<number[]>([]);
+  const [simonInputIdx, setSimonInputIdx] = useState(0);
+  const [simonLitPad, setSimonLitPad] = useState<number | null>(null);
+  const [simonPlaying, setSimonPlaying] = useState(false);
+  const [simonStatus, setSimonStatus] = useState('Press Start Sequence — repeat 3 musical rounds to win!');
+
+  const SIMON_PADS = [
+    { id: 0, label: 'Aqua C4', hz: 261.63, activeClass: 'bg-cyan-300 border-white text-slate-950', idleClass: 'bg-cyan-900/70 border-cyan-500/60 text-cyan-200 hover:bg-cyan-800/80' },
+    { id: 1, label: 'Emerald E4', hz: 329.63, activeClass: 'bg-emerald-300 border-white text-slate-950', idleClass: 'bg-emerald-900/70 border-emerald-500/60 text-emerald-200 hover:bg-emerald-800/80' },
+    { id: 2, label: 'Sunburst G4', hz: 392.0, activeClass: 'bg-amber-300 border-white text-slate-950', idleClass: 'bg-amber-900/70 border-amber-500/60 text-amber-200 hover:bg-amber-800/80' },
+    { id: 3, label: 'Lagoon C5', hz: 523.25, activeClass: 'bg-fuchsia-300 border-white text-slate-950', idleClass: 'bg-fuchsia-900/70 border-fuchsia-500/60 text-fuchsia-200 hover:bg-fuchsia-800/80' },
+  ] as const;
+
+  const playSimonSequence = (seq: number[]) => {
+    setSimonPlaying(true);
+    setSimonStatus(`Watch Round ${seq.length} (${seq.length} notes)...`);
+    seq.forEach((padId, idx) => {
+      window.setTimeout(() => {
+        setSimonLitPad(padId);
+        engine?.playBardNote(SIMON_PADS[padId].hz);
+        window.setTimeout(() => setSimonLitPad(null), 280);
+        if (idx === seq.length - 1) {
+          window.setTimeout(() => {
+            setSimonPlaying(false);
+            setSimonInputIdx(0);
+            setSimonStatus(`Your turn! Repeat ${seq.length} notes.`);
+          }, 340);
+        }
+      }, 480 * idx + 220);
+    });
+  };
+
+  const startSimonRound = (nextSeq?: number[]) => {
+    const firstPad = Math.floor(Math.random() * 4);
+    const seq = nextSeq ?? [firstPad];
+    setSimonSeq(seq);
+    setSimonInputIdx(0);
+    playSimonSequence(seq);
+  };
+
+  const handleSimonPadClick = (padId: number) => {
+    if (simonPlaying || simonSeq.length === 0) return;
+    setSimonLitPad(padId);
+    engine?.playBardNote(SIMON_PADS[padId].hz);
+    window.setTimeout(() => setSimonLitPad(null), 180);
+
+    if (simonSeq[simonInputIdx] !== padId) {
+      setSimonStatus('Missed note! Press Start Sequence to try again.');
+      setSimonSeq([]);
+      setSimonInputIdx(0);
+      return;
+    }
+    const nextIdx = simonInputIdx + 1;
+    if (nextIdx >= simonSeq.length) {
+      if (simonSeq.length >= 3) {
+        setSimonStatus('Cleared Round 3! Victory rewards granted!');
+        engine?.rewardArcadeWin('Simon Synth', 140, 45, 18);
+        setSimonSeq([]);
+        setSimonInputIdx(0);
+      } else {
+        const extended = [...simonSeq, Math.floor(Math.random() * 4)];
+        setSimonStatus(`Round ${simonSeq.length} cleared! Next round starting...`);
+        window.setTimeout(() => startSimonRound(extended), 450);
+      }
+    } else {
+      setSimonInputIdx(nextIdx);
+    }
+  };
+
+  const handleTttClick = (idx: number) => {
+    if (tttBoard[idx] !== null || checkTicTacToeWinner(tttBoard) !== null) return;
+    const next = [...tttBoard];
+    next[idx] = 'X';
+    engine?.playBardNote(392.0);
+    const afterPlayer = checkTicTacToeWinner(next);
+    if (afterPlayer === 'X') {
+      setTttBoard(next);
+      setTttStatus('You defeated the GeminIsland AI! (+120 Gold, +40 XP, +15 Spirit Stones)');
+      engine?.rewardArcadeWin('Voxel Tic-Tac-Toe', 120, 40, 15);
+      return;
+    }
+    if (afterPlayer === 'draw') {
+      setTttBoard(next);
+      setTttStatus('Stalemate draw! Reset to play again.');
+      return;
+    }
+    const aiIdx = pickTicTacToeAiMove(next);
+    if (aiIdx !== -1) {
+      next[aiIdx] = 'O';
+    }
+    setTttBoard(next);
+    const afterAi = checkTicTacToeWinner(next);
+    if (afterAi === 'O') {
+      setTttStatus('Island AI claimed the grid! Hit New Match to challenge again.');
+    } else if (afterAi === 'draw') {
+      setTttStatus('Stalemate draw! Reset to play again.');
+    } else {
+      setTttStatus('Your turn (X)');
+    }
+  };
+
+  const handleLightsToggle = (idx: number) => {
+    if (lightsSolved) return;
+    const next = toggleLightsOutGrid(lightsGrid, idx);
+    setLightsGrid(next);
+    setLightsMoves((m) => m + 1);
+    engine?.playBardNote(329.63 + (idx % 3) * 55);
+    if (isLightsOutSolved(next)) {
+      setLightsSolved(true);
+      engine?.rewardArcadeWin('Lights Out', 150, 50, 20);
+    }
+  };
 
   const fetchRealmSocial = useCallback(async () => {
     try {
@@ -1178,6 +1310,8 @@ export const SuiteModals: React.FC<SuiteModalsProps> = ({
                       { k: 'cinema', l: 'XR Cinema' },
                       { k: 'biolab', l: 'LoRA Bio-Lab' },
                       { k: 'bookstore', l: 'Rainy Bookstore' },
+                      { k: 'waterfall', l: 'Emerald Cliff Waterfall' },
+                      { k: 'arcade', l: 'GeminIsland Arcade' },
                       { k: 'sea', l: 'Ashen Sea' },
                     ] as Array<{ k: LandmarkKey; l: string }>
                   ).map((tp) => (
@@ -1500,6 +1634,191 @@ export const SuiteModals: React.FC<SuiteModalsProps> = ({
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 10. GEMINISLAND INTERACTIVE ARCADE (Tic-Tac-Toe, Simon Synth, Lights Out) */}
+        {activeModal === 'arcade' && (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="font-display text-lg font-bold text-cyan-300">GeminIsland Interactive Arcade</h2>
+                <p className="text-xs text-slate-400">
+                  Play authentic GeminIsland voxel mini-games to earn Gold, XP &amp; Spirit Stones · Arcade Wins:{' '}
+                  <span className="font-mono-tabular text-amber-300 font-bold">{hud.arcadeWins}</span>
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close GeminIsland Arcade"
+                onClick={onCloseModal}
+                className="rounded border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:text-white cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div className="flex gap-1.5">
+                {(
+                  [
+                    { k: 'ttt', label: 'Voxel Tic-Tac-Toe' },
+                    { k: 'simon', label: 'Simon Synth' },
+                    { k: 'lights', label: 'Lights Out 3×3' },
+                  ] as const
+                ).map((t) => (
+                  <button
+                    key={t.k}
+                    type="button"
+                    onClick={() => setArcadeTab(t.k)}
+                    className={`rounded-md border px-3 py-1.5 text-xs font-semibold cursor-pointer ${
+                      arcadeTab === t.k
+                        ? 'border-cyan-400 bg-cyan-500/20 text-cyan-200'
+                        : 'border-slate-700 bg-[#111829] text-slate-300 hover:border-slate-500'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    engine?.teleportTo('arcade');
+                    onCloseModal();
+                  }}
+                  className="rounded border border-slate-700 bg-[#182238] hover:border-cyan-400 px-2.5 py-1 text-xs text-slate-200 cursor-pointer"
+                >
+                  Teleport to Arcade
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    engine?.teleportTo('waterfall');
+                    onCloseModal();
+                  }}
+                  className="rounded border border-slate-700 bg-[#182238] hover:border-emerald-400 px-2.5 py-1 text-xs text-slate-200 cursor-pointer"
+                >
+                  Emerald Waterfall
+                </button>
+              </div>
+            </div>
+
+            {arcadeTab === 'ttt' && (
+              <div className="rounded-lg border border-slate-800 bg-[#111829] p-4 flex flex-col sm:flex-row items-center gap-5">
+                <div className="grid grid-cols-3 gap-2 w-[210px] shrink-0">
+                  {tttBoard.map((cell, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      aria-label={`Tic Tac Toe cell ${idx + 1}`}
+                      onClick={() => handleTttClick(idx)}
+                      className={`h-[64px] rounded-lg border text-2xl font-display font-bold transition-colors cursor-pointer ${
+                        cell === 'X'
+                          ? 'border-cyan-400 bg-cyan-950/60 text-cyan-300'
+                          : cell === 'O'
+                            ? 'border-rose-400 bg-rose-950/60 text-rose-300'
+                            : 'border-slate-700 bg-[#182238] hover:border-amber-400 text-slate-200'
+                      }`}
+                    >
+                      {cell ?? ''}
+                    </button>
+                  ))}
+                </div>
+                <div className="space-y-3 flex-1">
+                  <div className="text-xs font-semibold text-cyan-200">{tttStatus}</div>
+                  <p className="text-xs text-slate-400">
+                    Challenge the tactical GeminIsland AI. Victory awards +120 Gold, +40 XP, and +15 Spirit Stones directly to your hero.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTttBoard(Array<TicTacToeCell>(9).fill(null));
+                      setTttStatus('New match started — your turn (X).');
+                    }}
+                    className="rounded bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold px-3.5 py-1.5 text-xs cursor-pointer"
+                  >
+                    New Match
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {arcadeTab === 'simon' && (
+              <div className="rounded-lg border border-slate-800 bg-[#111829] p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-semibold text-amber-200">{simonStatus}</div>
+                  <button
+                    type="button"
+                    disabled={simonPlaying}
+                    onClick={() => startSimonRound()}
+                    className="rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-slate-950 font-bold px-3 py-1.5 text-xs cursor-pointer"
+                  >
+                    Start Sequence
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5 max-w-[340px] mx-auto">
+                  {SIMON_PADS.map((pad) => (
+                    <button
+                      key={pad.id}
+                      type="button"
+                      onClick={() => handleSimonPadClick(pad.id)}
+                      className={`h-[72px] rounded-lg border-2 font-display text-sm font-bold transition-all cursor-pointer ${
+                        simonLitPad === pad.id ? pad.activeClass : pad.idleClass
+                      }`}
+                    >
+                      {pad.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {arcadeTab === 'lights' && (
+              <div className="rounded-lg border border-slate-800 bg-[#111829] p-4 flex flex-col sm:flex-row items-center gap-5">
+                <div className="grid grid-cols-3 gap-2 w-[210px] shrink-0">
+                  {lightsGrid.map((lit, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      aria-label={`Lights Out tile ${idx + 1} ${lit ? 'on' : 'off'}`}
+                      onClick={() => handleLightsToggle(idx)}
+                      className={`h-[64px] rounded-lg border-2 font-mono-tabular text-xs font-bold transition-colors cursor-pointer ${
+                        lit
+                          ? 'border-amber-300 bg-amber-400 text-slate-950 shadow-md'
+                          : 'border-slate-700 bg-[#0b1222] text-slate-500 hover:border-slate-500'
+                      }`}
+                    >
+                      {lit ? 'ON' : 'OFF'}
+                    </button>
+                  ))}
+                </div>
+                <div className="space-y-3 flex-1">
+                  <div className="text-xs font-semibold text-amber-200">
+                    {lightsSolved
+                      ? `All lights extinguished in ${lightsMoves} moves! (+150 Gold, +50 XP, +20 Spirit Stones)`
+                      : `Extinguish every glowing voxel tile · Moves: ${lightsMoves}`}
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Clicking a tile toggles itself and its orthogonal neighbors. Every generated puzzle is guaranteed solvable.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextSeed = lightsSeed + 1;
+                      setLightsSeed(nextSeed);
+                      setLightsGrid(createLightsOutPuzzle(nextSeed));
+                      setLightsMoves(0);
+                      setLightsSolved(false);
+                    }}
+                    className="rounded bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold px-3.5 py-1.5 text-xs cursor-pointer"
+                  >
+                    Next Puzzle
+                  </button>
                 </div>
               </div>
             )}

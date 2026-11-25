@@ -26,6 +26,8 @@ export const LANDMARKS: Record<LandmarkKey, LandmarkSpec> = {
   biolab:     { key: 'biolab',     x: 44,   z: -32,  r: 15, h: 3.2,  name: 'LoRAFlow Bio-Lab' },
   bookstore:  { key: 'bookstore',  x: -22,  z: 16,   r: 11, h: 2.5,  name: 'Rainy Bookstore' },
   sea:        { key: 'sea',        x: -10,  z: 96,   r: 36, h: -2.4, name: 'Ashen Sea' },
+  waterfall:  { key: 'waterfall',  x: -46,  z: 74,   r: 16, h: 2.2,  name: 'Emerald Cliff Waterfall' },
+  arcade:     { key: 'arcade',     x: 22,   z: 18,   r: 10, h: 2.5,  name: 'GeminIsland Arcade' },
 };
 
 export function smoothstep(edge0: number, edge1: number, x: number): number {
@@ -74,6 +76,7 @@ export function getTerrainHeight(x: number, z: number): number {
  */
 export function getBiome(x: number, z: number): string {
   if (z < DUNGEON_Z_THRESHOLD) return 'Sunken Ruin Dungeon';
+  if (Math.hypot(x - LANDMARKS.waterfall.x, z - LANDMARKS.waterfall.z) < 22) return 'Emerald Falls';
   if (Math.hypot(x - LANDMARKS.sea.x, z - LANDMARKS.sea.z) < 38) return 'Ashen Sea';
   if (Math.hypot(x + 78, z + 78) < 46) return 'Frostpeak Tundra';
   if (Math.hypot(x - LANDMARKS.malakor.x, z - LANDMARKS.malakor.z) < 36) return 'Ashfield Wastes';
@@ -95,6 +98,8 @@ export function isOnTrail(x: number, z: number): boolean {
     [0, 0, LANDMARKS.cinema.x, LANDMARKS.cinema.z],
     [0, 0, LANDMARKS.biolab.x, LANDMARKS.biolab.z],
     [0, 0, LANDMARKS.dungeon.x, LANDMARKS.dungeon.z],
+    [0, 0, LANDMARKS.arcade.x, LANDMARKS.arcade.z],
+    [LANDMARKS.dungeon.x, LANDMARKS.dungeon.z, LANDMARKS.waterfall.x, LANDMARKS.waterfall.z],
   ];
 
   for (const [ax, az, bx, bz] of segments) {
